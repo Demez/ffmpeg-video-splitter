@@ -6,7 +6,7 @@ Example usage of the timestamps file (any name and extension you want it to be) 
 Example command line usage:
 
 ```
-py -config "PATH_TO_CONFIG" -ffmpeg "PATH_TO_FFMPEG" [/final]
+py ffmpeg_video_splitter.py -config "PATH_TO_CONFIG" -ffmpeg "PATH_TO_FFMPEG" [/final]
 ```
 
 `/final` sets ffmpeg to use h265 encoding instead of quick h264 encoding by default
