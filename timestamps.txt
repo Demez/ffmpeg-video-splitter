@@ -1,0 +1,22 @@
+// each group is a video, title is the video name
+// the 2 timestamps in each line in the group is a region that will be kept in the video
+// every value HAS to be in quotes or the whole thing dies
+
+"example clip.mkv"
+{
+	// example time range, this is what is kept from the video
+	// start			end
+	"00:01:05.000"		"00:01:07.000"
+	"00:01:09.400"		"00:01:20.000"
+}
+
+/*
+
+This entire section here is commented out
+
+"example commented out clip.mkv"
+{
+	"00:00:24.000"		"00:00:46.000"
+}*/
+
+
