@@ -1,22 +1,40 @@
-// each group is a video, title is the video name
-// the 2 timestamps in each line in the group is a region that will be kept in the video
-// every value HAS to be in quotes or the whole thing dies
-
-"example clip.mkv"
-{
-	// example time range, this is what is kept from the video
-	// start			end
-	"00:01:05.000"		"00:01:07.000"
-	"00:01:09.400"		"00:01:20.000"
-}
-
 /*
+Example Timestamp file for ffmpeg-video-splitter
 
 This entire section here is commented out
 
-"example commented out clip.mkv"
+"example commented out clip.mkv" { "00:00:24.000"		"00:00:46.000" }
+*/
+
+// commas to seperate timestamps are entirely optional, i only added that here to make it sligtly neater if you for whatever reason mash it all into one line
+"example single line video.mkv" { "example clip.mkv" { "00:01:05.000" "00:01:07.000", "00:01:09.400" "00:01:20.000" } "example sub clip.mkv" { "00:00:45.000" "00:00:58.000"}}
+
+"example clippp.mkv" // the output file name (will be forced as mkv output since mkv is just the best)
 {
+	// input file path
+	"folder/example input video.mkv"
+	{
+		"00:01:05.000"	"00:01:07.000"
+		"00:01:09.400"	"00:01:20.000"
+	}
+	
+	"folder/another folder/example input video 2.mkv"
+	{
+		"00:00:45.000"	"00:00:58.000"
+	}
+}
+
+"example of.mkv"
+{
+	// if you don't specify an input for some timestamps
+	// it will look for an input with the same name as the output
 	"00:00:24.000"		"00:00:46.000"
-}*/
+	"00:00:24.000"		"00:00:46.000"
+	"00:00:24.000"		"00:00:46.000"
+	
+	"input video.mkv"		 {
+		"00:00:24.000"		"00:00:46.000"
+	}
+}
 
 
