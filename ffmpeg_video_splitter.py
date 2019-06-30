@@ -99,34 +99,34 @@ def FindMultiLineCommentStart( line ):
     return line
 
 # removes tabs, new lines, makes sure the output after that isn't empty
-# also 
+# also removes spaces in between quotes
 def FixLineCharacters( line ):
 
-    new_line = ''.join( line.split( "\t" ) )
-    new_line = ''.join( new_line.split( "\n" ) )
+    line = ''.join( line.split( "\t" ) )
+    line = ''.join( line.split( "\n" ) )
     
     in_quote = False
-    new_new_line = "" # nice var name, lmao
+    new_line = ""
 
     # remove spaces in between quotes by checking each character and checking if we are in quote or not
-    for char in new_line:
+    for char in line:
         if char == "\"":
             in_quote = not in_quote
 
         if char == " " and not in_quote:
             continue
         else:
-            new_new_line = new_new_line + char
+            new_line = new_line + char
 
     # now fix any incorrect path seperators
     # TODO: set up for posix
     if os.name == "nt":
-        if '/' in new_new_line:
+        if '/' in new_line:
             # split by "/" and then join it right after with the correct character
-            new_new_line = '\\'.join( new_new_line.split( '/' ) ) 
+            new_line = '\\'.join( new_line.split( '/' ) ) 
 
-    if new_new_line != '':
-        return new_new_line
+    if new_line != '':
+        return new_line
     return None
 
 # this is fucking disgusting probably
@@ -158,24 +158,21 @@ def ParseLine( line ):
 
     if '"' in line:
 
-        # new video file
         # split the line and check string by string
         line_split = line.split( '"' )
-        
-        # might be a key?
-        if line.startswith( "output_folder" ):
-            out_folder = ""
 
         str_index = 0
         while str_index < len( line_split ):
 
             string = line_split[ str_index ]
 
+            # key option
             if string == "output_folder":
                 out_folder = line_split[ str_index + 2 ]
                 return # nothing else should be in this line
+            
+            # no other keys, so it's a new video file
 
-        #for string in quote_split:
             if "{" in string:
                 for char in string:
                     if char == "{":
@@ -213,7 +210,7 @@ def ParseLine( line ):
                     # add the timestamp
                     video_blocks[ filename ][ filename ][ sub_clip ].append( line_split[ str_index ] )
                     video_blocks[ filename ][ filename ][ sub_clip ].append( line_split[ str_index + 2 ] )
-                    str_index += 2 # skip past the end timestamp
+                    str_index += 2 # skip to the end timestamp
                     file_index += 1
                 else:
                     CheckIfDictExists( video_blocks[ filename ], string, "dict" )
@@ -226,9 +223,8 @@ def ParseLine( line ):
                 # add the timestamp
                 video_blocks[ filename ][ current_block ][ sub_clip ].append( line_split[ str_index ] )
                 video_blocks[ filename ][ current_block ][ sub_clip ].append( line_split[ str_index + 2 ] )
-                str_index += 2 # skip past the end timestamp
+                str_index += 2 # skip to the end timestamp
                 file_index += 1
-                #continue
 
             str_index += 1
 
@@ -257,10 +253,6 @@ if ffmpeg_bin != None:
         else:
             ffmpeg_bin = ffmpeg_bin + os.sep
 
-#if ffmpeg == None:
-    # on linux you can just put this in the command line, so if you don't specify -ffmpeg, it will just use this (bad idea?)
-    #ffmpeg = "ffmpeg"
-
 final_encode = FindArgument( "/final" )
 
 root_dir = config_file.rsplit( os.sep, 1 )[0] + os.sep
@@ -271,6 +263,7 @@ in_multiline_comment = False
 sub_block_num = 0
 current_block = ""
 filename = ""
+out_folder = ""
 video_blocks = {}
 
 # main
@@ -309,8 +302,8 @@ def SplitTime( timestamp ):
     return time
 
 def CreateDirectory( directory ):
-    if not os.path.isdir( directory ):
-        os.mkdir( directory )
+    if not os.path.exists( directory ):
+        os.makedirs( directory )
         
 def RemoveDirectory( directory ):
     if os.path.isdir( directory ):
@@ -414,7 +407,15 @@ def GetAudioTrackCount( video ):
     return audio_tracks
 
 temp_path = root_dir + "TEMP_SPLIT" + os.sep
-out_dir = root_dir + "concat" + os.sep
+
+if out_folder == '':
+    out_dir = root_dir + "concat" + os.sep
+else:
+    # how do i set the root folder on linux lmao
+    if os.name == "nt" and ":\\" in out_folder:
+        out_dir = out_folder + os.sep
+    else:
+        out_dir = root_dir + out_folder
 
 CreateDirectory( temp_path )
 
