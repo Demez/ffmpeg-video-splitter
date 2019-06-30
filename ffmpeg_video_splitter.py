@@ -17,12 +17,9 @@ import datetime
 # IDEAS:
 # 
 # - add a setting for selecting a monitor if it's mkv, check if it's the 16:9 and 5:4 monitor or two 16:9 monitors by the resolution
-# - add support for multiple files to be merged as one
 # - change title bar for the video
 # - add an option minimize the ffmpeg output so it only shows the progress, this would be REALLY nice
-# - add ffprobe support for audio channel checking
 # - Clean up ffmpeg output SOMEHOW
-# - and also clean up the rest of the output
 # - allow the top to update in another thread as it's running
 # ------------------------------------------------------------------------------------------------------------------------------------------------
 
