@@ -732,7 +732,7 @@ if __name__ == "__main__":
 
     PrintTimestampsFile( video_list, output_folder, final_encode, verbose )
 
-    # StartEncodingVideos( video_list, output_folder, final_encode, verbose )
+    StartEncodingVideos( video_list, output_folder, final_encode, verbose )
 
     # would be cool to add crc checking for each time range somehow
 
