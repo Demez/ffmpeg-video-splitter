@@ -236,10 +236,16 @@ def _FormatConfigBlocks( config ):
             new_split_line = []
             for item in split_line:
                 if "{" in item or "}" in item:
+                    # what about if the length is over 2?
                     if new_split_line:
                         new_config.append( new_split_line )
                     new_config.append( [item] )
                     new_split_line = []
+                elif len(new_split_line) >= 2:
+                    new_config.append( new_split_line )
+                    new_split_line = []
+                    new_split_line.append( item )
+
                 else:
                     new_split_line.append( item )
 
