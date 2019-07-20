@@ -38,15 +38,15 @@ def FindCommandValue( arg, short_arg ):
 
 
 class VideoFile:
-    def __init__(self, filename, root_folder, output_folder, force_file_ext):
+    def __init__(self, filename, root_folder, config_folder, output_folder, force_file_ext):
 
         self.output_folder = output_folder
 
         self.rawpath = os.path.normpath( filename )
-        self.path = os.path.normpath( filename )
+        self.path = os.path.normpath( output_folder + os.sep + filename )
 
         if force_file_ext:
-            prefix = os.path.splitext(filename)[0]
+            prefix = os.path.splitext(self.path)[0]
             if "." not in force_file_ext:
                 force_file_ext = "." + force_file_ext
             self.path = os.path.normpath( prefix + force_file_ext )
@@ -56,9 +56,13 @@ class VideoFile:
         else:
             self.filename = self.path
 
-        self.full_path = os.path.normpath( output_folder + os.sep + self.path )
+        if os.path.isabs( output_folder ):
+            self.full_path = self.path
+        else:
+            self.full_path = os.path.normpath( config_folder + self.path )
 
-        self.root_folder = root_folder
+        self.root_config_folder = config_folder
+        self.root_video_folder = root_folder
         self.input_videos = []
 
         self.skip = False  # this will be set to true if the crc check fails
@@ -70,9 +74,8 @@ class VideoFile:
             if input_video_filename == input_video_obj.rawpath:
                 return
 
-        input_video = InputVideoFile( input_video_filename, self.root_folder )
+        input_video = InputVideoFile( input_video_filename, self.root_video_folder, self.root_config_folder )
         self.input_videos.append( input_video )
-
         return
 
     def AddTimeRange(self, start, end):
@@ -84,14 +87,22 @@ class VideoFile:
 
 
 class InputVideoFile:
-    def __init__(self, filename, root_folder):
-        self.abspath = os.path.normpath( root_folder + os.sep + filename )
-        self.filename = self.abspath.rsplit( os.sep, 1 )[1]
-        # self.folder = self.abspath.rsplit( os.sep, 1 )[0]
-        self.rawpath = filename
-        self.time_ranges = []
+    def __init__(self, filename, root_folder, config_folder):
+        if os.path.isabs(filename):
+            self.abspath = os.path.normpath( filename )
+        else:
+            self.abspath = os.path.normpath( root_folder + filename )
 
-        self.crc = ''
+        self.filename = self.abspath.rsplit( os.sep, 1 )[1]
+
+        # bad idea?
+        if os.path.isabs(filename):
+            self.rawpath = os.path.normpath( filename )
+        else:
+            append_folder = ''.join( root_folder.split( config_folder, 1 ) )
+            self.rawpath = os.path.normpath( append_folder + filename )
+
+        self.time_ranges = []
 
     def AddTimeRange(self, start, end):
         self.time_ranges.append([ConvertToDateTime(start), ConvertToDateTime(end)])
@@ -362,30 +373,36 @@ def ParseConfig( root_folder, config_blocks, base_output_folder, config_folder, 
     if verbose:
         print( "Parsing Config" )
 
+    full_root_folder = config_folder
+    full_output_folder = base_output_folder
     force_file_ext = False
     video_list = []
     for block_obj in config_blocks:
 
-        if block_obj.key == "base_output_folder" or block_obj.key == "output_folder":
-            if os.path.isabs( block_obj.value ):
-                base_output_folder = os.path.normpath( block_obj.value ) + os.sep
-            else:
-                base_output_folder = os.path.normpath( config_folder + block_obj.value ) + os.sep
+        if block_obj.key == "$base_output_folder" or block_obj.key == "$output_folder":
+            base_output_folder = os.path.normpath( block_obj.value ) + os.sep
             full_output_folder = base_output_folder
 
-        elif block_obj.key == "append_output_folder":
+        elif block_obj.key == "$append_output_folder":
             if os.path.isabs( block_obj.value ):
                 full_output_folder = os.path.normpath( block_obj.value )
             else:
                 full_output_folder = os.path.normpath( base_output_folder + block_obj.value )
 
-        elif block_obj.key == "force_file_ext":
+        elif block_obj.key == "$force_file_ext":
             force_file_ext = block_obj.value
+
+        elif block_obj.key == "$input_video_folder":
+            if os.path.isabs( block_obj.value ):
+                full_root_folder = os.path.normpath( block_obj.value ) + os.sep
+            else:
+                full_root_folder = os.path.normpath( config_folder + block_obj.value ) + os.sep
 
         # is a video file
         else:
 
-            video_file = VideoFile( block_obj.key, config_folder, full_output_folder, force_file_ext )
+            # video_file = VideoFile( block_obj.key, config_folder, config_folder, full_output_folder, force_file_ext )
+            video_file = VideoFile( block_obj.key, full_root_folder, config_folder, full_output_folder, force_file_ext )
 
             if block_obj.items:
                 AddInputVideosToVideo( video_file, block_obj )
@@ -408,7 +425,7 @@ def AddInputVideosToVideo( video_file, block_obj ):
     for input_video_block in block_obj.items:
 
         crc_list = []
-        # issue - will add multiple of the same input video, ugh
+        input_video_block.key = os.path.normpath( input_video_block.key )
         if ":" in input_video_block.key and not os.sep in input_video_block.key:
             video_file.AddInputVideo( video_file.rawpath )
             video_file.AddTimeRange(input_video_block.key, input_video_block.value)
@@ -639,7 +656,7 @@ def GetAudioTrackCount( video ):
     return audio_tracks
 
 
-def StartEncodingVideos( video_list, final_encode, verbose = False ):
+def StartEncodingVideos( video_list, final_encode, default_output_folder, verbose = False ):
 
     temp_path = os.path.dirname(os.path.realpath(__file__)) + os.sep + "TEMP" + os.sep
     CreateDirectory(temp_path)
@@ -651,10 +668,9 @@ def StartEncodingVideos( video_list, final_encode, verbose = False ):
         MakeCRCFile(root_folder, output_video.filename, output_video.crc_list)
         DeleteFile( output_video.full_path )
 
-        if verbose:
-            print(output_video.full_path + "\n")
-        else:
-            print("Output Video: " + output_video.path + "\n")
+        # print("Output Video: " + output_video.full_path.replace(default_output_folder, "") + "\n")
+        # print("Output Video: " + output_video.path + "\n")
+        print(output_video.path + "\n")
 
         temp_video_list = []
         temp_video_num = 0
@@ -757,7 +773,8 @@ if __name__ == "__main__":
     else:
         config_folder = config_filepath.rsplit( os.sep, 1 )[0] + os.sep
 
-    base_output_folder = config_folder + "output" + os.sep
+    # base_output_folder = config_folder + "output" + os.sep
+    base_output_folder = "output" + os.sep
 
     # root_folder, config_blocks, output_folder, config_folder, final_encode
 
@@ -765,7 +782,7 @@ if __name__ == "__main__":
 
     PrintTimestampsFile(video_list, base_output_folder, final_encode, verbose)
 
-    StartEncodingVideos(video_list, final_encode, verbose)
+    StartEncodingVideos(video_list, final_encode, base_output_folder, verbose)
 
     # would be cool to add crc checking for each time range somehow
 
