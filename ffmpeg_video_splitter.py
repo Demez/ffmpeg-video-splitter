@@ -123,7 +123,7 @@ def ConvertToDateTime(timestamp_str):
 
     seconds = float(time_split[0])
     minutes = int(time_split[1])
-    hours = int(time_split[2])\
+    hours = int(time_split[2])
 
     time_dt = datetime.timedelta(hours=hours, minutes=minutes, seconds=seconds)
 
@@ -398,7 +398,7 @@ def ParseConfig( root_folder, config_blocks, base_output_folder, config_folder, 
             if not os.path.isfile(video_file.full_path):
                 continue
 
-            elif not CheckCRC(root_folder, video_file, video_file.crc_list, base_output_folder, final_encode):
+            elif not CheckCRC(root_folder, video_file, video_file.crc_list):
                 video_file.skip = True
 
     return video_list, base_output_folder
@@ -466,7 +466,6 @@ def RunFFMpegConCat(sub_video_list, out_video):
             temp_file.write("file '" + sub_video + "'\n")
 
     ffmpeg_command = []
-    input_list = []
 
     ffmpeg_command.append(ffmpeg_bin + "ffmpeg")
     ffmpeg_command.append("-y")
@@ -481,14 +480,9 @@ def RunFFMpegConCat(sub_video_list, out_video):
     # output file
     ffmpeg_command.append('"' + out_video + '"')
 
-    # sys.stdout.write( "Creating Output Video... " )
-
-    # subprocess.run( ' '.join( ffmpeg_command ), shell = True )
-
     RunFFMpeg(' '.join(ffmpeg_command))
 
-    # sys.stdout.write( "Finished\n" )
-    # print("Created Output Video" + "\n-----------------------------------------------------------")
+    # print("Created Output Video")
     print("\n-----------------------------------------------------------")
 
     os.remove("temp.txt")
@@ -528,7 +522,7 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video, final_encode,
     if final_encode:
         ffmpeg_command.append("-c:v libx265")
         ffmpeg_command.append("-crf 8")
-        ffmpeg_command.append("-preset medium")
+        ffmpeg_command.append("-preset slow")  # medium
     else:
         ffmpeg_command.append("-c:v libx264")
         ffmpeg_command.append("-crf 24")
@@ -542,42 +536,75 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video, final_encode,
     # output file
     ffmpeg_command.append('"' + temp_video + '"')
 
+    total_frames = GetTotalFrameCount( dt_diff, GetFrameRate(input_video.abspath) )
+
     if verbose:
         print("Start: " + time_start + " - End: " + time_end)
+        print("Total Frames: " + str(total_frames))
 
-    # TODO: move all the stuff below into it's own function
-    RunFFMpeg(' '.join(ffmpeg_command), time_diff)
+    RunFFMpeg(' '.join(ffmpeg_command), total_frames)
+
+    if verbose:
+        print("")  # space in between
 
     return
 
 
-def RunFFMpeg( cmd, total_time = None ):
+def GetFrameRate( video_path ):
+    command = [
+        ffmpeg_bin + "ffprobe",
+        "-v 0",
+        "-of csv=p=0",
+        "-select_streams v:0",
+        "-show_entries stream=r_frame_rate",
+        '"' + video_path + '"'
+    ]
+
+    output = subprocess.check_output(' '.join(command), shell=True)
+
+    output = str(output).replace( "\\r", "" )
+    output = output.replace( "\\n", "" )
+    output = output.replace( "\'", "" )
+    output = output.replace( "b", "" )
+
+    numerator, denominator = output.split( "/" )
+
+    frame_rate = int(numerator) / int(denominator)
+
+    return frame_rate
+
+
+def GetTotalFrameCount( dt_time_length, frame_rate ):
+    return dt_time_length.total_seconds() * frame_rate
+
+
+def RunFFMpeg( cmd, total_frames = None ):
     ffmpeg_run = subprocess.Popen( cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True )
+
+    if total_frames:
+        UpdateProgressBar( 0.00, 52 )  # start it at 0
 
     # TODO:
     # - do i need to check for any errors? or is that taken care of with stderr going directly out?
     # - maybe change it so it updates the same line?
     for line in ffmpeg_run.stdout:
 
-        if total_time:
-            if "time=" in line:
+        if total_frames:
+            if "frame=" in line:
                 # use the total time range and divide it by ffmpeg's current time in the encode to get a percentage
-                line_split = line.split( "time=" )[1]
-                current_time_str = line_split.split( " bitrate=" )[0]
-                percentage = GetPercent( current_time_str, total_time, 2 )
-                UpdateProgressBar( percentage, 45 )
+                line_split = line.split( "frame= " )[1]
+                current_frame = line_split.split( " fps=" )[0]  # wrong
+                percentage = GetPercent( int(current_frame),  total_frames, 2 )
+                UpdateProgressBar( percentage, 52 )
                 # IDEA: replace the progress bar with "\n" once it's done?
 
-    if total_time:
-        print( "" )  # leave a space for the next one
+    if total_frames:
+        UpdateProgressBar(100.0, 52)  # usually it finishes before we can catch the last frame
+        # print( "" )  # leave a space for the next one
 
 
-def GetPercent( current_time_str, total_time_str, round_num ):
-
-    current_time_dt = ConvertToDateTime( current_time_str )
-    total_time_dt = ConvertToDateTime( total_time_str )
-
-    return round( ( current_time_dt.total_seconds() / total_time_dt.total_seconds() ) * 100, round_num )
+def GetPercent( current_frame, total_frames, round_num ):
+    return round( ( current_frame / total_frames ) * 100, round_num )
 
 
 def UpdateProgressBar( percentage, width ):
@@ -612,7 +639,7 @@ def GetAudioTrackCount( video ):
     return audio_tracks
 
 
-def StartEncodingVideos( video_list, default_out_folder, final_encode, verbose = False ):
+def StartEncodingVideos( video_list, final_encode, verbose = False ):
 
     temp_path = os.path.dirname(os.path.realpath(__file__)) + os.sep + "TEMP" + os.sep
     CreateDirectory(temp_path)
@@ -623,7 +650,11 @@ def StartEncodingVideos( video_list, default_out_folder, final_encode, verbose =
 
         MakeCRCFile(root_folder, output_video.filename, output_video.crc_list)
         DeleteFile( output_video.full_path )
-        print("Output Video: " + output_video.path + "\n")
+
+        if verbose:
+            print(output_video.full_path + "\n")
+        else:
+            print("Output Video: " + output_video.path + "\n")
 
         temp_video_list = []
         temp_video_num = 0
@@ -654,7 +685,7 @@ def StartEncodingVideos( video_list, default_out_folder, final_encode, verbose =
     return
 
 
-def CheckCRC( root_dir, video_obj, crc_list, output_folder, final_encode ):
+def CheckCRC( root_dir, video_obj, crc_list ):
 
     if verbose:
         print( "Checking CRC: " + video_obj.filename + ".crc" )
@@ -734,7 +765,7 @@ if __name__ == "__main__":
 
     PrintTimestampsFile(video_list, base_output_folder, final_encode, verbose)
 
-    StartEncodingVideos(video_list, base_output_folder, final_encode, verbose)
+    StartEncodingVideos(video_list, final_encode, verbose)
 
     # would be cool to add crc checking for each time range somehow
 
