@@ -2,17 +2,28 @@
 Example Timestamp file for ffmpeg-video-splitter
 
 This entire section here is commented out
-
-"example commented out clip.mkv" { "00:00:24.000"		"00:00:46.000" }
 */
 
-// override the default output folder of "concat" with this
-"output_folder" "new/output/folders"
+// spacing doesn't matter at all here
+	example_clip.mkv 				{ "ass   aS.mp4" 				{ 	00:00:24.000 					00:00:46.000 						}}
+
+// you don't even need spaces in-between quotes
+"example  clip with no     spaces in between      quotes.mkv"{"ass   aS.mp4"{"00:00:24.000""00:00:46.000"}}
+
+// you also don't even need spaces in-between (most) keys, and quotes are optional as well
+example_with_little_spaces_and_quotes.mkv{ass_aS.mp4{00:00:24.000 00:00:46.000}}
+
+// you can use tabs to format things as well
+	"example  clip with tabs in between      keys.mkv"			{			"ass   aS.mp4"			{	00:00:24.000							00:00:46.000	}		}
+
+
+// override the default output folder of "concat" with this, will apply to all folders (idk about the videos above though)
+output_folder 	  			 		    new/output/folders   
 
 // commas to seperate timestamps are entirely optional, i only added that here to make it sligtly neater if you for whatever reason mash it all into one line
-"example single line video.mkv" { "example clip.mkv" { "00:01:05.000" "00:01:07.000", "00:01:09.400" "00:01:20.000" } "example sub clip.mkv" { "00:00:45.000" "00:00:58.000"}}
+"example single line video.mkv" { "example sub clip 0.mkv" { "00:01:05.000" "00:01:07.000", "00:01:09.400" "00:01:20.000" } "example sub clip 1.mkv" { "00:00:45.000" "00:00:58.000"}}
 
-"../../relative/path/video.mkv" // the output file name (will be forced as mkv output since mkv is just the best)
+"../../relative/path/video.mkv" // the output file name
 {
 	// input file path
 	"folder/example input video.mkv"
@@ -27,10 +38,22 @@ This entire section here is commented out
 	}
 }
 
-"D:/example/of/absolute path/video.mkv"
+"D:/example/of/windows/absolute path/video.mkv"
 {
 	// if you don't specify an input for some timestamps
-	// it will look for an input with the same name as the output
+	// it will create an input video with the same path as the output video
+	"00:00:24.000"		"00:00:46.000"
+	"00:01:05.000"		"00:01:07.000"
+	"00:01:09.400"		"00:01:20.000"
+	
+	"input video.mkv"		 {
+		"00:00:24.000"		"00:00:46.000"
+	}
+}
+
+
+"/example/of/linux/absolute path/video.mkv"
+{
 	"00:00:24.000"		"00:00:46.000"
 	"00:00:24.000"		"00:00:46.000"
 	"00:00:24.000"		"00:00:46.000"
