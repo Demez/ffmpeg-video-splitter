@@ -169,9 +169,6 @@ def CleanFile(config):
 
         line = line.split("//", 1)[0]
 
-        # remove new lines
-        line = ''.join(line.split("\n"))
-
         if not line:
             continue
 
@@ -352,11 +349,11 @@ def CreateConfigBlockObject( block ):
 
 def ReadConfig( config_filepath ):
     with open(config_filepath, mode="r", encoding="utf-8") as config_file:
-        config = config_file.readlines()
+        config = config_file.read().splitlines()
 
-        config = CleanFile( config )
-        config = _FormatConfigBlocks( config )
-        config_blocks = CreateConfigBlocks( config )
+    config = CleanFile( config )
+    config = _FormatConfigBlocks( config )
+    config_blocks = CreateConfigBlocks( config )
 
     return config_blocks
 
