@@ -8,9 +8,10 @@ import datetime
 # what an awful name
 # 
 # some boring explanation i can't write right now
-# i also need to upload this to github aaaa
 # 
 # HOW TO USE: you look at how i use it and figure it out yourself future me
+#
+# ok now looking at this after remaking vpc in python, this script is fucking awful, i should really make a v2 version with some stuff from this
 # 
 # Made by Demez, 05/17/2019
 # ------------------------------------------------------------------------------------------------------------------------------------------------
@@ -22,81 +23,70 @@ import datetime
 # - Clean up ffmpeg output SOMEHOW
 # - allow the top to update in another thread as it's running
 # ------------------------------------------------------------------------------------------------------------------------------------------------
-
+        
 def FindArgument( search, return_value = False ):
     if search in sys.argv:
-        index = 0
-
-        for arg in sys.argv:
-            if search == sys.argv[index]:
-                if return_value:
-                    return sys.argv[ index + 1 ]
-                else:
-                    return True
-
-            index += 1
+        if return_value:
+            return sys.argv[ sys.argv.index( search ) + 1 ]
+        else:
+            return True
     else:
         return False
+    
+def GetArgumentValue( search ):
+    if search in sys.argv:
+        return sys.argv[ sys.argv.index( search ) + 1 ]
+    else:
+        return False
+# ------------------------------------------------------------------------------------------------------------------------------------------------
+# Timestamp File Parser Functions
 
-def RemoveComments( line ):
-    line_new = line.split( "//", 1 )[0] # comment type 1
-    if line_new != None:
-        line_new = RemoveMultiLineComments( line_new )
+def RemoveCommentsAndFixLines( config ):
 
-    return line_new
+    line_num = 0
+    while line_num < len( config ):
+        config[ line_num ] = config[ line_num ].split( "//", 1 )[0] # comment type 1
+        line_num += 1
 
-def RemoveMultiLineComments( line ):
+    return RemoveMultiLineCommentsAndFixLines( config )
 
-    global in_multiline_comment
 
-    if in_multiline_comment == True:
-        commment_end = line.find( "*/" )
+def RemoveMultiLineCommentsAndFixLines( config ):
 
-        if commment_end == -1:
-            return None
-        else:
-            commment_end += 2 # end comment takes up 2 characters
+    in_comment = False
 
-            line_new = line[commment_end:]
+    # split each string by "/" and check if the start and end characters in each item in the split string is "*"
+    # and some other stuff
+    line_num = 0
+    while line_num < len( config ):
 
-            if line_new.find( "/*" ) != -1:
-                # might close and open a new mulit-line comment in the same line
-                line_new = FindMultiLineCommentStart( line_new )
+        line_split = config[ line_num ].split( "/" )
 
-            in_multiline_comment = False
+        item_num = 0
+        while item_num < len( line_split ):
+            if line_split[ item_num ].startswith( "*" ):
 
-            line_new = FindMultiLineCommentStart( line_new )
-            return line_new
+                if line_split[ item_num ].endswith( "*" ):
+                    del line_split[ item_num ]
+                    in_comment = False
 
-    line_new = FindMultiLineCommentStart( line )
+                # the comment goes over multiple lines
+                else:
+                    del line_split[ item_num ]
+                    in_comment = True
+            elif in_comment:
+                del line_split[ item_num ]
+            else:
+                item_num += 1
 
-    return line_new
+        # BUG: if there is an invalid string like this: '/*     */  invalid string  /* comment */    /*'
+        # it will result in this: '/  invalid string  /'
+        # due to joining the split line with '/'
+        # so just fix it by running this function here lmao
+        config[ line_num ] = FixLineCharacters( '/'.join( line_split ) )
+        line_num += 1
 
-def FindMultiLineCommentStart( line ):
-    global in_multiline_comment
-
-    commment_start = line.find( "/*" )
-
-    if commment_start != -1:
-        commment_end = line.find( "*/" )
-
-        line_new = line[:commment_start]
-
-        if commment_end != -1:
-            commment_end += 2 # end comment takes up 2 characters
-
-            #line_new = line_new.split( "/*" )
-
-            line_new = line[:commment_start] + line[commment_end:]
-
-            if line_new.find( "/*" ) != -1:
-                line_new = RemoveMultiLineComments( line_new )
-
-        else:
-            in_multiline_comment = True
-
-        return line_new
-    return line
+    return config
 
 # removes tabs, new lines, makes sure the output after that isn't empty
 # also removes spaces in between quotes
@@ -112,11 +102,16 @@ def FixLineCharacters( line ):
     for char in line:
         if char == "\"":
             in_quote = not in_quote
-
-        if char == " " and not in_quote:
-            continue
-        else:
             new_line = new_line + char
+            continue
+
+        if in_quote or char == "{" or char == "}":
+            new_line = new_line + char
+
+        #if char == " " and not in_quote:
+        #    continue
+        #else:
+        #    new_line = new_line + char
 
     # now fix any incorrect path seperators
     # TODO: set up for posix
@@ -125,9 +120,7 @@ def FixLineCharacters( line ):
             # split by "/" and then join it right after with the correct character
             new_line = '\\'.join( new_line.split( '/' ) ) 
 
-    if new_line != '':
-        return new_line
-    return None
+    return new_line
 
 # this is fucking disgusting probably
 def CheckIfDictExists( dictionary, key, value_type ):
@@ -144,7 +137,9 @@ def CheckIfDictExists( dictionary, key, value_type ):
 
 # TODO: add support for full filepaths, then you can delete the above
 # also clean up the global vars if you can
-def ParseLine( line ):
+# maybe rework this to account for the whole config?
+# it might be a bit cleaner, but i really don't feel like it just after rewriting this
+def ParseLine( line, line_number ):
 
     global sub_block_num
     global current_block
@@ -152,6 +147,7 @@ def ParseLine( line ):
     global video_blocks
     global file_index
     global out_folder
+    global out_folder_line
 
     if sub_block_num == 0:
         file_index = 0
@@ -168,7 +164,11 @@ def ParseLine( line ):
 
             # key option
             if string == "output_folder":
-                out_folder = line_split[ str_index + 2 ]
+                if out_folder == '':
+                    out_folder = line_split[ str_index + 2 ]
+                    out_folder_line = line_number
+                else:
+                    print( "Warning: output_folder defined on lines " + str(out_folder_line) + " and " + str(line_number)  )
                 return # nothing else should be in this line
             
             # no other keys, so it's a new video file
@@ -239,53 +239,8 @@ def ParseLine( line ):
             if char == "}":
                 sub_block_num -= 1
 
-# --------------------------------------------------------------------------------------------------------
-
-config_file = FindArgument( "-config", True )
-
-#if os.name == "nt":
-ffmpeg_bin = FindArgument( "-ffmpeg_bin", True )
-
-if ffmpeg_bin != None:
-    if not ffmpeg_bin.endswith( os.sep ):
-        if ffmpeg_bin.endswith( '"' ):
-            ffmpeg_bin = ffmpeg_bin.rsplit( '"', 1 )[0] + os.sep
-        else:
-            ffmpeg_bin = ffmpeg_bin + os.sep
-
-final_encode = FindArgument( "/final" )
-
-root_dir = config_file.rsplit( os.sep, 1 )[0] + os.sep
-
-# wow
-file_index = 0
-in_multiline_comment = False
-sub_block_num = 0
-current_block = ""
-filename = ""
-out_folder = ""
-video_blocks = {}
-
-# main
-with open( config_file, mode = "r", encoding = "utf-8" ) as config:
-
-    for line in config:
-
-        # get rid of any comments
-        line_new = RemoveComments( line )
-
-        if line_new == None:
-            continue
-
-        line_new = FixLineCharacters( line_new )
-
-        if line_new == None:
-            continue
-
-        ParseLine( line_new )
-         
-# ========================================================================================================
-# ok now we can throw this stuff into ffmpeg
+# ------------------------------------------------------------------------------------------------------------------------------------------------
+# FFMpeg Function Stuff
 
 def SplitTime( timestamp ):
     time_split = timestamp.split( ":" )
@@ -335,18 +290,25 @@ def RunFFMpegConCat( sub_video_list, out_video ):
     # output file
     ffmpeg_command.append( '"' + out_video + '"' )
 
-    subprocess.run( ' '.join( ffmpeg_command ), shell = True )
+    #sys.stdout.write( "Creating Output Video... " )
+
+    #subprocess.run( ' '.join( ffmpeg_command ), shell = True )
+
+    RunFFMpeg( ' '.join( ffmpeg_command ) )
     
+    #sys.stdout.write( "Finished\n" )
+    print( "Created Output Video" + "\n-----------------------------------------------------------" )
+
     os.remove( "temp.txt" )
 
-def RunFFMpegSubVideo( in_video, out_video, start_time, length_time ):
+def RunFFMpegSubVideo( in_video, out_video, time_start, time_length, time_end ):
 
     ffmpeg_command = []
 
     ffmpeg_command.append( ffmpeg_bin + "ffmpeg" )
     ffmpeg_command.append( "-y" )
     ffmpeg_command.append( "-ss" )
-    ffmpeg_command.append( start_time )
+    ffmpeg_command.append( time_start )
     ffmpeg_command.append( '-i "' + in_video + '"' )
 
     # get audio track count
@@ -377,12 +339,54 @@ def RunFFMpegSubVideo( in_video, out_video, start_time, length_time ):
     ffmpeg_command.append( "-c:a flac" )
 
     ffmpeg_command.append( "-t" )
-    ffmpeg_command.append( length_time )
+    ffmpeg_command.append( time_length )
 
     # output file
     ffmpeg_command.append( '"' + out_video + '"' )
 
-    subprocess.run( ' '.join( ffmpeg_command ), shell = True )
+    file_name = in_video.rsplit( os.sep, 1 )[1]
+    print( "Splitting: " + file_name )
+
+    global verbose
+    if verbose:
+        print( "Start: " + time_start + " - End: " + time_end )
+
+    # TODO: move all the stuff below into it's own function
+    RunFFMpeg( ' '.join( ffmpeg_command ), time_length )
+
+    return
+
+def RunFFMpeg( cmd, total_time = None ):
+    ffmpeg_run = subprocess.Popen( cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True )
+
+    # TODO: 
+    # - do i need to check for any errors? or is that taken care of with stderr going directly out?
+    # - maybe change it so it updates the same line?
+    for line in ffmpeg_run.stdout:
+
+        if total_time != None:
+            if "time=" in line:
+                # use the total time range and divide it by ffmpeg's current time in the encode to get a percentage
+                line_split = line.split( "time=" )[1]
+                current_time_str = line_split.split( " bitrate=" )[0]
+                percentage = GetPercent( current_time_str, total_time, 2 )
+                #print( str( percentage ) + "%" )
+                UpdateProgressBar( percentage, 45 )
+
+                # IDEA: replace the progress bar with "\n" once it's done?
+
+    if total_time != None:
+        print( "\n" ) # leave a space for the next one
+
+def GetPercent( current_time_str, total_time_str, round_num ):
+
+    current_time_list = SplitTime( current_time_str )
+    total_time_list = SplitTime( total_time_str )
+
+    current_time_dt = datetime.timedelta( hours = current_time_list[ "hr" ], minutes = current_time_list[ "min" ], seconds = current_time_list[ "sec" ] )
+    total_time_dt = datetime.timedelta( hours = total_time_list[ "hr" ], minutes = total_time_list[ "min" ], seconds = total_time_list[ "sec" ] )
+
+    return round( ( current_time_dt.total_seconds() / total_time_dt.total_seconds() ) * 100, round_num )
 
 def GetAudioTrackCount( video ):
 
@@ -406,89 +410,160 @@ def GetAudioTrackCount( video ):
 
     return audio_tracks
 
-temp_path = root_dir + "TEMP_SPLIT" + os.sep
-
-if out_folder == '':
-    out_dir = root_dir + "concat" + os.sep
-else:
-    # how do i set the root folder on linux lmao
-    if os.name == "nt" and ":\\" in out_folder:
-        out_dir = out_folder + os.sep
-    else:
-        out_dir = root_dir + out_folder
-
-CreateDirectory( temp_path )
-
 # some shitty thing to print what we just parsed
-for out_video in video_blocks:
-    print( out_video )
+def PrintTimestampsFile( verbose ):
+    cmd_bar_line = "-----------------------------------------------------------"
 
-    for in_video in video_blocks[ out_video ]:
-        print( "    " + in_video )
+    print( cmd_bar_line )
 
-        for sub_video in video_blocks[ out_video ][ in_video ]:
-            timerange = video_blocks[ out_video ][ in_video ][ sub_video ][0] + " - " + video_blocks[ out_video ][ in_video ][ sub_video ][1]
-            print( "        " + timerange )
-    print( "" )
+    if verbose:
+        print( "Timestamps File" )
+        print( cmd_bar_line )
+        for out_video in video_blocks:
+            print( out_video )
 
-for video in video_blocks:
+            for in_video in video_blocks[ out_video ]:
+                print( "    " + in_video )
 
-    index = 0
-    for sub_video in video_blocks[ video ]:
-        for sub_clip in video_blocks[ video ][ sub_video ]:
+                for sub_video in video_blocks[ out_video ][ in_video ]:
+                    print( "        " + video_blocks[ out_video ][ in_video ][ sub_video ][0] + " - " + video_blocks[ out_video ][ in_video ][ sub_video ][1] )
 
-            start = SplitTime( video_blocks[ video ][ sub_video ][ sub_clip ][0] )
-            end = SplitTime( video_blocks[ video ][ sub_video ][ sub_clip ][1] )
-
-            #dt_start = datetime.timedelta( hours = start[ "hr" ], minutes = start[ "min" ], seconds = start[ "sec" ], milliseconds = start[ "ms" ] )
-            dt_start = datetime.timedelta( hours = start[ "hr" ], minutes = start[ "min" ], seconds = start[ "sec" ] )
-            #dt_end = datetime.timedelta( hours = end[ "hr" ], minutes = end[ "min" ], seconds = end[ "sec" ], milliseconds = end[ "ms" ] )
-            dt_end = datetime.timedelta( hours = end[ "hr" ], minutes = end[ "min" ], seconds = end[ "sec" ] )
-
-            time_difference = dt_end.total_seconds() - dt_start.total_seconds()
-            dt_diff = datetime.timedelta( seconds = time_difference )
-
-            if os.sep in sub_video:
-                sub_video_split = sub_video.rsplit( os.sep, 1 )
-
-                full_path = sub_video_split[0] + os.sep
-                sub_video_name = sub_video_split[1]
-
-                if ":\\" not in full_path and os.name == "nt":
-                    full_path = root_dir + full_path
-            else:
-                full_path = root_dir
-                sub_video_name = sub_video
-        
-            RunFFMpegSubVideo( full_path + sub_video_name, temp_path + "sub_video_" + str( index ) + ".mkv", str( dt_start ), str( dt_diff ) )
-
-            index += 1
-
-    # ok, now combine the sub videos together
-    sub_video_list = []
-    while( len( sub_video_list ) < index ):                           # lol
-        sub_video_list.append( temp_path + "sub_video_" + str( len( sub_video_list ) ) + ".mkv" )
-
-    if os.sep in video:
-        out_video_split = video.rsplit( os.sep, 1 )
-
-        full_out_dir = out_video_split[0] + os.sep
-        out_video_name = out_video_split[1].rsplit( ".", 1 )[0]
-
-        if ":\\" not in full_out_dir and os.name == "nt":
-            full_out_dir = out_dir + full_out_dir
+            print( "" )
+    print( "Output Folder: " + out_folder )
+    if final_encode:
+        print( "Final Encode - Using H265 - CRF 10" )
     else:
-        full_out_dir = out_dir
-        out_video_name = video.rsplit( ".", 1 )[0]
+        print( "Quick Encode - Using H264 - CRF 24" )
+    print( cmd_bar_line )
 
-    CreateDirectory( full_out_dir )
+    return
 
-    RunFFMpegConCat( sub_video_list, full_out_dir + out_video_name + ".mkv" )
 
-# really not needed, and gives an OSError on linux saying it's not empty
-#RemoveDirectory( temp_path )
+def UpdateProgressBar( percentage, width ):
+    percent = percentage / 100
 
-print( "\n---------------------------------------------------------------" )
-print( "Finished" )
-print( "---------------------------------------------------------------\n" )
+    block = int(round( width * percent ))
+    text = "\r{0} {1}%".format( "█" * block + "░"*( width - block ), percentage )
+    sys.stdout.write( text )
+    sys.stdout.flush()
+
+        
+#=========================================================================================================
+if __name__ == "__main__":
+    
+    config_file = FindArgument( "-config", True )
+    ffmpeg_bin = FindArgument( "-ffmpeg_bin", True )
+    final_encode = FindArgument( "/final" )
+    verbose = FindArgument( "/verbose" )
+
+    if ffmpeg_bin != False:
+        if not ffmpeg_bin.endswith( os.sep ):
+            if ffmpeg_bin.endswith( '"' ):
+                ffmpeg_bin = ffmpeg_bin.rsplit( '"', 1 )[0] + os.sep
+            else:
+                ffmpeg_bin = ffmpeg_bin + os.sep
+    else:
+        print( "unknown ffmpeg path, use -ffmpeg_bin \"PATH\"" )
+
+    # wow
+    file_index = 0
+    #in_multiline_comment = False
+    sub_block_num = 0
+    current_block = ""
+    filename = ""
+    out_folder = ""
+    out_folder_line = 0
+    video_blocks = {}
+
+    # Move to ReadTimestampFile( config_file )?
+    with open( config_file, mode = "r", encoding = "utf-8" ) as config_read:
+
+        config = config_read.readlines()
+
+        config_new = RemoveCommentsAndFixLines( config )
+
+        line_num = 0
+        while line_num < len( config ):
+            ParseLine( config[ line_num ], line_num )
+            line_num += 1
+            
+    root_dir = config_file.rsplit( os.sep, 1 )[0] + os.sep
+    temp_path = root_dir + "TEMP_SPLIT" + os.sep
+    CreateDirectory( temp_path )
+
+    if out_folder == '':
+        out_dir = root_dir + "concat" + os.sep
+    else:
+        # root folder on linux would probably be ./, ~/ means home, right?
+        if os.name == "nt" and ":\\" in out_folder:
+            out_dir = out_folder + os.sep
+        else:
+            out_dir = root_dir + out_folder
+
+    PrintTimestampsFile( verbose )
+
+    #StartEncodingVideos()
+
+    # maybe make the progress bar for the whole file?
+    for video in video_blocks:
+
+        index = 0
+        print( "Output Video: " + video + "\n" )
+        for sub_video in video_blocks[ video ]:
+            for sub_clip in video_blocks[ video ][ sub_video ]:
+
+                start = SplitTime( video_blocks[ video ][ sub_video ][ sub_clip ][0] )
+                end = SplitTime( video_blocks[ video ][ sub_video ][ sub_clip ][1] )
+
+                #dt_start = datetime.timedelta( hours = start[ "hr" ], minutes = start[ "min" ], seconds = start[ "sec" ], milliseconds = start[ "ms" ] )
+                dt_start = datetime.timedelta( hours = start[ "hr" ], minutes = start[ "min" ], seconds = start[ "sec" ] )
+                #dt_end = datetime.timedelta( hours = end[ "hr" ], minutes = end[ "min" ], seconds = end[ "sec" ], milliseconds = end[ "ms" ] )
+                dt_end = datetime.timedelta( hours = end[ "hr" ], minutes = end[ "min" ], seconds = end[ "sec" ] )
+
+                time_difference = dt_end.total_seconds() - dt_start.total_seconds()
+                dt_diff = datetime.timedelta( seconds = time_difference )
+
+                if os.sep in sub_video:
+                    sub_video_split = sub_video.rsplit( os.sep, 1 )
+
+                    full_path = sub_video_split[0] + os.sep
+                    sub_video_name = sub_video_split[1]
+
+                    # would this be "./" on linux?
+                    if ":\\" not in full_path and os.name == "nt":
+                        full_path = root_dir + full_path
+                else:
+                    full_path = root_dir
+                    sub_video_name = sub_video
+        
+                RunFFMpegSubVideo( full_path + sub_video_name, temp_path + "sub_video_" + str( index ) + ".mkv", str( dt_start ), str( dt_diff ), str( dt_end ) )
+
+                index += 1
+
+        # ok, now combine the sub videos together
+        sub_video_list = []
+        while( len( sub_video_list ) < index ):                           # lol
+            sub_video_list.append( temp_path + "sub_video_" + str( len( sub_video_list ) ) + ".mkv" )
+
+        if os.sep in video:
+            out_video_split = video.rsplit( os.sep, 1 )
+
+            full_out_dir = out_video_split[0] + os.sep
+            out_video_name = out_video_split[1].rsplit( ".", 1 )[0]
+
+            if ":\\" not in full_out_dir and os.name == "nt":
+                full_out_dir = out_dir + full_out_dir
+        else:
+            full_out_dir = out_dir
+            out_video_name = video.rsplit( ".", 1 )[0]
+
+        CreateDirectory( full_out_dir )
+
+        RunFFMpegConCat( sub_video_list, full_out_dir + out_video_name + ".mkv" )
+
+    # really not needed, and gives an OSError on linux saying it's not empty
+    #RemoveDirectory( temp_path )
+
+    print( "Finished" )
+    print( "---------------------------------------------------------------\n" )
 
