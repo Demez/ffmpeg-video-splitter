@@ -473,9 +473,9 @@ def PrintTimestampsFile( video_list, out_folder, final_encode, verbose = False )
             print( "" )
     print( "Default Output Folder: " + out_folder )
     if final_encode:
-        print( "Final Encode - Using H265 - CRF 8" )
+        print( "Final Encode - Using H265 - CRF 8 - Slow Preset" )
     else:
-        print( "Quick Encode - Using H264 - CRF 24" )
+        print( "Quick Encode - Using H264 - CRF 24 - Ultrafast Preset" )
     print( cmd_bar_line )
 
     return
