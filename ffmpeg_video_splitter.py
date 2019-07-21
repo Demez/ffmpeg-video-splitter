@@ -61,6 +61,8 @@ class VideoFile:
         else:
             self.full_path = os.path.normpath( config_folder + self.path )
 
+        self.full_output_path = self.full_path.rsplit( os.sep, 1 )[0] + os.sep
+
         self.root_config_folder = config_folder
         self.root_video_folder = root_folder
         self.input_videos = []
@@ -118,6 +120,9 @@ class InputVideoFile:
         return datetime.timedelta(seconds=time_difference)
 
 
+# something i just noticed, i never have a value and items at the same time
+# i only have items or a value
+# so i use it exactly like valve's KeyValues, which it's based on
 class ConfigBlock:
     def __init__(self, key, value):
         self.key = key
@@ -656,7 +661,7 @@ def GetAudioTrackCount( video ):
     return audio_tracks
 
 
-def StartEncodingVideos( video_list, final_encode, default_output_folder, verbose = False ):
+def StartEncodingVideos( video_list, final_encode, verbose = False ):
 
     temp_path = os.path.dirname(os.path.realpath(__file__)) + os.sep + "TEMP" + os.sep
     CreateDirectory(temp_path)
@@ -671,6 +676,10 @@ def StartEncodingVideos( video_list, final_encode, default_output_folder, verbos
         # print("Output Video: " + output_video.full_path.replace(default_output_folder, "") + "\n")
         # print("Output Video: " + output_video.path + "\n")
         print(output_video.path + "\n")
+
+        date_modified = None
+        if len(output_video.input_videos) == 1:
+            date_modified = GetDateModified(output_video.input_videos[0].abspath)
 
         temp_video_list = []
         temp_video_num = 0
@@ -691,10 +700,12 @@ def StartEncodingVideos( video_list, final_encode, default_output_folder, verbos
                 if time_range_number < len(input_video.time_ranges):
                     print( "" )
 
-        CreateDirectory( output_video.output_folder )
+        CreateDirectory( output_video.full_output_path )
 
         # now combine all the sub videos together
         RunFFMpegConCat(temp_video_list, output_video.full_path)
+
+        ReplaceDateModified(output_video.full_path, date_modified)
 
     RemoveDirectory(temp_path)  # has an issue on linux
 
@@ -748,6 +759,17 @@ def MakeCRCFile( root_dir, video_name, crc_list ):
     return
 
 
+def GetDateModified( file ):
+
+    if os.name == "nt":
+        return os.path.getmtime(file)
+    else:
+        return os.stat(file).st_mtime
+
+def ReplaceDateModified( file, mod_time ):
+    os.utime( file, (mod_time, mod_time) )
+
+
 if __name__ == "__main__":
 
     config_filepath = FindCommandValue("--config", "-c")
@@ -782,7 +804,7 @@ if __name__ == "__main__":
 
     PrintTimestampsFile(video_list, base_output_folder, final_encode, verbose)
 
-    StartEncodingVideos(video_list, final_encode, base_output_folder, verbose)
+    StartEncodingVideos(video_list, final_encode, verbose)
 
     # would be cool to add crc checking for each time range somehow
 
