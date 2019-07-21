@@ -487,43 +487,39 @@ def RunFFMpegConCat(sub_video_list, out_video):
         for sub_video in sub_video_list:
             temp_file.write("file '" + sub_video + "'\n")
 
-    ffmpeg_command = []
-
-    ffmpeg_command.append(ffmpeg_bin + "ffmpeg")
-    ffmpeg_command.append("-y")
-    ffmpeg_command.append("-safe 0")
-
-    ffmpeg_command.append("-f concat")
-    ffmpeg_command.append("-i temp.txt")  # i wish i didn't need this but i do, ugh
-
-    ffmpeg_command.append("-c copy")
-    ffmpeg_command.append("-map 0")
-
-    # output file
-    ffmpeg_command.append('"' + out_video + '"')
+    ffmpeg_command = (
+        ffmpeg_bin + "ffmpeg",
+        "-y",
+        "-safe 0",
+        "-f concat",
+        "-i temp.txt",
+        "-c copy",
+        "-map 0",
+        '"' + out_video + '"'
+    )
 
     RunFFMpeg(' '.join(ffmpeg_command))
 
-    # print("Created Output Video")
-    print("\n-----------------------------------------------------------")
+    if verbose:
+        print("Created Output Video")
 
     os.remove("temp.txt")
 
 
-def RunFFMpegSubVideo( time_range_number, input_video, temp_video, final_encode, verbose ):
+def RunFFMpegSubVideo( time_range_number, input_video, temp_video ):
 
     dt_start, dt_end, dt_diff = input_video.GetTimeRange( time_range_number )
     time_start = str(dt_start)
     time_end = str(dt_end)
     time_diff = str(dt_diff)
 
-    ffmpeg_command = []
-
-    ffmpeg_command.append(ffmpeg_bin + "ffmpeg")
-    ffmpeg_command.append("-y")
-    ffmpeg_command.append("-ss")
-    ffmpeg_command.append(time_start)
-    ffmpeg_command.append('-i "' + input_video.abspath + '"')
+    ffmpeg_command = [
+        ffmpeg_bin + "ffmpeg",
+        "-y",
+        "-ss",
+        time_start,
+        '-i "' + input_video.abspath + '"'
+    ]
 
     # get audio track count
     audio_tracks = GetAudioTrackCount(input_video.abspath)
@@ -573,14 +569,14 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video, final_encode,
 
 
 def GetFrameRate( video_path ):
-    command = [
+    command = (
         ffmpeg_bin + "ffprobe",
         "-v 0",
         "-of csv=p=0",
         "-select_streams v:0",
         "-show_entries stream=r_frame_rate",
         '"' + video_path + '"'
-    ]
+    )
 
     output = subprocess.check_output(' '.join(command), shell=True)
 
@@ -606,9 +602,6 @@ def RunFFMpeg( cmd, total_frames = None ):
     if total_frames:
         UpdateProgressBar( 0.00, 52 )  # start it at 0
 
-    # TODO:
-    # - do i need to check for any errors? or is that taken care of with stderr going directly out?
-    # - maybe change it so it updates the same line?
     for line in ffmpeg_run.stdout:
 
         if total_frames:
@@ -661,7 +654,7 @@ def GetAudioTrackCount( video ):
     return audio_tracks
 
 
-def StartEncodingVideos( video_list, final_encode, verbose = False ):
+def StartEncodingVideos( video_list ):
 
     temp_path = os.path.dirname(os.path.realpath(__file__)) + os.sep + "TEMP" + os.sep
     CreateDirectory(temp_path)
@@ -693,7 +686,7 @@ def StartEncodingVideos( video_list, final_encode, verbose = False ):
                 temp_video = temp_path + str(temp_video_num) + ".mkv"
                 temp_video_list.append( temp_video )
 
-                RunFFMpegSubVideo( time_range_number, input_video, temp_video, final_encode, verbose )
+                RunFFMpegSubVideo( time_range_number, input_video, temp_video )
                 time_range_number += 1
                 temp_video_num += 1
 
@@ -705,7 +698,11 @@ def StartEncodingVideos( video_list, final_encode, verbose = False ):
         # now combine all the sub videos together
         RunFFMpegConCat(temp_video_list, output_video.full_path)
 
+        print("")
+
         ReplaceDateModified(output_video.full_path, date_modified)
+
+        print("-----------------------------------------------------------")
 
     RemoveDirectory(temp_path)  # has an issue on linux
 
@@ -767,6 +764,8 @@ def GetDateModified( file ):
         return os.stat(file).st_mtime
 
 def ReplaceDateModified( file, mod_time ):
+    if verbose:
+        print( "Replacing Date Modified" )
     os.utime( file, (mod_time, mod_time) )
 
 
@@ -804,7 +803,7 @@ if __name__ == "__main__":
 
     PrintTimestampsFile(video_list, base_output_folder, final_encode, verbose)
 
-    StartEncodingVideos(video_list, final_encode, verbose)
+    StartEncodingVideos(video_list)
 
     # would be cool to add crc checking for each time range somehow
 
