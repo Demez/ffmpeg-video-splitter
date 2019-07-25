@@ -72,8 +72,13 @@ class VideoFile:
 
     def AddInputVideo(self, input_video_filename):
 
+        if os.path.isabs( input_video_filename ):
+            full_input_video_path = input_video_filename
+        else:
+            full_input_video_path = os.path.normpath(self.root_video_folder + input_video_filename)
+
         for input_video_obj in self.input_videos:
-            if input_video_filename == input_video_obj.rawpath:
+            if full_input_video_path == input_video_obj.abspath:
                 return
 
         input_video = InputVideoFile( input_video_filename, self.root_video_folder, self.root_config_folder )
@@ -595,9 +600,6 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video ):
 
     RunFFMpeg(' '.join(ffmpeg_command), total_frames)
 
-    if verbose:
-        print("")  # space in between
-
     return
 
 
@@ -701,11 +703,12 @@ def StartEncodingVideos( video_list ):
             continue
 
         MakeCRCFile(root_folder, output_video.filename, output_video.crc_list)
+        # TODO: if this gets a PermissionError and we run again, it will skip, need to fix
         DeleteFile( output_video.full_path )
 
         # print("Output Video: " + output_video.full_path.replace(default_output_folder, "") + "\n")
         # print("Output Video: " + output_video.path + "\n")
-        print(output_video.path + "\n")
+        print(output_video.path)
 
         date_modified = None
         if len(output_video.input_videos) == 1:
@@ -715,7 +718,7 @@ def StartEncodingVideos( video_list ):
         temp_video_num = 0
         for input_video in output_video.input_videos:
 
-            print("Splitting: " + input_video.filename)
+            print("\nSplitting: " + input_video.filename)
 
             time_range_number = 0
             while time_range_number < len(input_video.time_ranges):
@@ -729,6 +732,7 @@ def StartEncodingVideos( video_list ):
 
                 if time_range_number < len(input_video.time_ranges):
                     print( "" )
+            print( "" )
 
         CreateDirectory( output_video.full_output_path )
 
@@ -737,7 +741,8 @@ def StartEncodingVideos( video_list ):
 
         print("")
 
-        ReplaceDateModified(output_video.full_path, date_modified)
+        if date_modified:
+            ReplaceDateModified(output_video.full_path, date_modified)
 
         print("-----------------------------------------------------------")
 
