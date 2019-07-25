@@ -495,7 +495,7 @@ def RunFFMpegConCat(sub_video_list, out_video):
         "-i temp.txt",
         "-c copy",
         "-map 0",
-        '"' + out_video + '"'
+        '"' + out_video.full_path + '"'
     )
 
     RunFFMpeg(' '.join(ffmpeg_command))
@@ -524,17 +524,6 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video ):
     # get audio track count
     audio_tracks = GetAudioTrackCount(input_video.abspath)
 
-    # this is really just a hardcoded hack since this is what i use it for lmao
-    if audio_tracks == 5:
-        ffmpeg_command.append("-filter_complex \"[0:a:1][0:a:2]amerge[out]\"")
-        ffmpeg_command.append("-map \"[out]\"")
-    elif audio_tracks == 2:
-        # need to check if the audio clip only has one track or not with ffprobe
-        ffmpeg_command.append("-filter_complex \"[0:a:0][0:a:1]amerge[out]\"")
-        ffmpeg_command.append("-map \"[out]\"")
-    else:
-        ffmpeg_command.append("-map 0:a")
-
     ffmpeg_command.append("-map 0:v")
 
     if final_encode:
@@ -546,10 +535,54 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video ):
         ffmpeg_command.append("-crf 24")
         ffmpeg_command.append("-preset ultrafast")
 
-    ffmpeg_command.append("-c:a flac")
+    # TODO: make sure the output colors are not messed up with this
 
-    ffmpeg_command.append("-t")
-    ffmpeg_command.append(time_diff)
+    # shadowplay color range: Limited
+    # shadowplay color primaries: BT.601 NTSC
+    # shadowplay color space: YUV
+    # shadowplay standard: PAL
+
+    # what does this do?
+    # "-h full"
+
+    # this stretches the color range i think, so it looks like fucking shit with limited color range
+    # ffmpeg_command.append("-vf scale=in_range=limited:out_range=full")
+
+    # ffmpeg_command.append("-vf colormatrix bt709")
+
+    # this is really just a hardcoded hack since this is what i use it for lmao
+    if audio_tracks == 5:
+        ffmpeg_command.append("-filter_complex \"[0:a:1][0:a:2]amerge[out]\"")
+        ffmpeg_command.append("-map \"[out]\"")
+    elif audio_tracks == 2:
+        # Shadowplay - PAL:
+        ffmpeg_command.append("-colorspace bt470bg -color_primaries bt470bg -color_trc gamma28")
+
+        ffmpeg_command.append("-filter_complex \"[0:a:0][0:a:1]amerge[out]\"")
+        ffmpeg_command.append("-map \"[out]\"")
+    else:
+        # Shadowplay - PAL:
+        ffmpeg_command.append("-colorspace bt470bg -color_primaries bt470bg -color_trc gamma28")
+        ffmpeg_command.append("-map 0:a")
+
+    # NTSC - OBS?:
+    # ffmpeg_command.append("-colorspace smpte170m -color_primaries smpte170m -color_trc smpte170m")
+
+    # TODO: test this on newer clips with full color range
+    # i do notice very minor color changes with this from limited to full
+    # doesn't do anything?
+    # ffmpeg_command.append("-pix_fmt yuvj420p")
+    # ffmpeg_command.append("-pix_fmt yuv420p")
+
+    # ffmpeg_command.append("-c:a flac")
+
+    ffmpeg_command.append("-c:a libvorbis")
+    # This is a bug in ffmpeg, so im using libvorbis for now until this is fixed
+    # ffmpeg_command.append("-c:a libopus")
+
+    ffmpeg_command.append("-b:a 192k")
+
+    ffmpeg_command.append("-t " + time_diff)
 
     # output file
     ffmpeg_command.append('"' + temp_video + '"')
@@ -597,25 +630,29 @@ def GetTotalFrameCount( dt_time_length, frame_rate ):
 
 
 def RunFFMpeg( cmd, total_frames = None ):
-    ffmpeg_run = subprocess.Popen( cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True )
 
-    if total_frames:
-        UpdateProgressBar( 0.00, 52 )  # start it at 0
-
-    for line in ffmpeg_run.stdout:
+    if raw_ffmpeg:
+        subprocess.run( cmd )
+    else:
+        ffmpeg_run = subprocess.Popen( cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True )
 
         if total_frames:
-            if "frame=" in line:
-                # use the total time range and divide it by ffmpeg's current time in the encode to get a percentage
-                line_split = line.split( "frame= " )[1]
-                current_frame = line_split.split( " fps=" )[0]  # wrong
-                percentage = GetPercent( int(current_frame),  total_frames, 2 )
-                UpdateProgressBar( percentage, 52 )
-                # IDEA: replace the progress bar with "\n" once it's done?
+            UpdateProgressBar( 0.00, 52 )  # start it at 0
 
-    if total_frames:
-        UpdateProgressBar(100.0, 52)  # usually it finishes before we can catch the last frame
-        # print( "" )  # leave a space for the next one
+        for line in ffmpeg_run.stdout:
+
+            if total_frames:
+                if "frame=" in line:
+                    # use the total time range and divide it by ffmpeg's current time in the encode to get a percentage
+                    line_split = line.split( "frame= " )[1]
+                    current_frame = line_split.split( " fps=" )[0]  # wrong
+                    percentage = GetPercent( int(current_frame),  total_frames, 2 )
+                    UpdateProgressBar( percentage, 52 )
+                    # IDEA: replace the progress bar with "\n" once it's done?
+
+        if total_frames:
+            UpdateProgressBar(100.0, 52)  # usually it finishes before we can catch the last frame
+            # print( "" )  # leave a space for the next one
 
 
 def GetPercent( current_frame, total_frames, round_num ):
@@ -696,7 +733,7 @@ def StartEncodingVideos( video_list ):
         CreateDirectory( output_video.full_output_path )
 
         # now combine all the sub videos together
-        RunFFMpegConCat(temp_video_list, output_video.full_path)
+        RunFFMpegConCat(temp_video_list, output_video)
 
         print("")
 
@@ -763,6 +800,7 @@ def GetDateModified( file ):
     else:
         return os.stat(file).st_mtime
 
+
 def ReplaceDateModified( file, mod_time ):
     if verbose:
         print( "Replacing Date Modified" )
@@ -775,6 +813,7 @@ if __name__ == "__main__":
     ffmpeg_bin = FindCommandValue("--ffmpeg_bin", "-ff")
     final_encode = FindCommand("/final", "/f")
     verbose = FindCommand("/verbose", "/v")
+    raw_ffmpeg = FindCommand("/raw_ffmpeg", "/raw")
 
     if ffmpeg_bin:
         if not ffmpeg_bin.endswith(os.sep):
