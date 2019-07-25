@@ -66,6 +66,7 @@ class VideoFile:
         self.root_config_folder = config_folder
         self.root_video_folder = root_folder
         self.input_videos = []
+        self.ffmpeg_cmd_line = []
 
         self.skip = False  # this will be set to true if the crc check fails
         self.crc_list = []
@@ -91,6 +92,10 @@ class VideoFile:
         input_video.AddTimeRange(start, end)
 
         return
+
+    def AddFFMpegCommand(self,ffmpeg_cmd):
+        ffmpeg_cmd = ffmpeg_cmd.replace("'", "\"")
+        self.ffmpeg_cmd_line.append(ffmpeg_cmd)
 
 
 class InputVideoFile:
@@ -386,6 +391,7 @@ def ParseConfig( root_folder, config_blocks, base_output_folder, config_folder, 
     full_root_folder = config_folder
     full_output_folder = base_output_folder
     force_file_ext = False
+
     video_list = []
     for block_obj in config_blocks:
 
@@ -411,8 +417,8 @@ def ParseConfig( root_folder, config_blocks, base_output_folder, config_folder, 
         # is a video file
         else:
 
-            # video_file = VideoFile( block_obj.key, config_folder, config_folder, full_output_folder, force_file_ext )
-            video_file = VideoFile( block_obj.key, full_root_folder, config_folder, full_output_folder, force_file_ext )
+            video_file = VideoFile( block_obj.key, full_root_folder, config_folder,
+                                    full_output_folder, force_file_ext )
 
             if block_obj.items:
                 AddInputVideosToVideo( video_file, block_obj )
@@ -443,6 +449,9 @@ def AddInputVideosToVideo( video_file, block_obj ):
             crc_list.append( GetCRC(video_file.rawpath) )
             crc_list.append( GetCRC(input_video_block.key) )
             crc_list.append( GetCRC(input_video_block.value) )
+
+        elif input_video_block.key == "$ffmpeg_cmd":
+            video_file.AddFFMpegCommand(input_video_block.value)
 
         else:
             video_file.AddInputVideo( input_video_block.key )
@@ -511,7 +520,7 @@ def RunFFMpegConCat(sub_video_list, out_video):
     os.remove("temp.txt")
 
 
-def RunFFMpegSubVideo( time_range_number, input_video, temp_video ):
+def RunFFMpegSubVideo( time_range_number, input_video, temp_video, ffmpeg_cmds ):
 
     dt_start, dt_end, dt_diff = input_video.GetTimeRange( time_range_number )
     time_start = str(dt_start)
@@ -588,6 +597,10 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video ):
     ffmpeg_command.append("-b:a 192k")
 
     ffmpeg_command.append("-t " + time_diff)
+
+    # any custom commands
+    for ffmpeg_cmd in ffmpeg_cmds:
+        ffmpeg_command.append(ffmpeg_cmd)
 
     # output file
     ffmpeg_command.append('"' + temp_video + '"')
@@ -726,7 +739,7 @@ def StartEncodingVideos( video_list ):
                 temp_video = temp_path + str(temp_video_num) + ".mkv"
                 temp_video_list.append( temp_video )
 
-                RunFFMpegSubVideo( time_range_number, input_video, temp_video )
+                RunFFMpegSubVideo( time_range_number, input_video, temp_video, output_video.ffmpeg_cmd_line )
                 time_range_number += 1
                 temp_video_num += 1
 
