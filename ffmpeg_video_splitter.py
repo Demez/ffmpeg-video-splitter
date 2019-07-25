@@ -452,6 +452,7 @@ def AddInputVideosToVideo( video_file, block_obj ):
 
         elif input_video_block.key == "$ffmpeg_cmd":
             video_file.AddFFMpegCommand(input_video_block.value)
+            crc_list.append( GetCRC(input_video_block.value) )
 
         else:
             video_file.AddInputVideo( input_video_block.key )
