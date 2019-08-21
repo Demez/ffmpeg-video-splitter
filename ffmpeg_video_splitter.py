@@ -43,8 +43,9 @@ class VideoFile:
         self.output_folder = output_folder
 
         self.rawpath = os.path.normpath( filename )
-        self.path = os.path.normpath( output_folder + os.sep + filename )
 
+        self.path = os.path.normpath(output_folder + os.sep + filename)
+        
         if force_file_ext:
             prefix = os.path.splitext(self.path)[0]
             if "." not in force_file_ext:
@@ -66,36 +67,50 @@ class VideoFile:
         self.root_config_folder = config_folder
         self.root_video_folder = root_folder
         self.input_videos = []
-        self.ffmpeg_cmd_line = []
+
+        self.global_ffmpeg_cmd = []
+        self.global_filter_complex = []
 
         self.skip = False  # this will be set to true if the crc check fails
         self.crc_list = []
 
-    def AddInputVideo(self, input_video_filename):
+    def AddInputVideo(self, input_video_filename, check=True):
 
         if os.path.isabs( input_video_filename ):
             full_input_video_path = input_video_filename
         else:
             full_input_video_path = os.path.normpath(self.root_video_folder + input_video_filename)
 
-        for input_video_obj in self.input_videos:
-            if full_input_video_path == input_video_obj.abspath:
-                return
+        if check:
+            for input_video_obj in self.input_videos:
+                if full_input_video_path == input_video_obj.abspath:
+                    return
 
         input_video = InputVideoFile( input_video_filename, self.root_video_folder, self.root_config_folder )
+        input_video.ffmpeg_cmd_line.extend(self.global_ffmpeg_cmd)
+        input_video.filter_complex_list.extend(self.global_filter_complex)
         self.input_videos.append( input_video )
-        return
 
     def AddTimeRange(self, start, end):
         # maybe i should use a filename and get the index instead? idk
         input_video = self.input_videos[-1]
         input_video.AddTimeRange(start, end)
 
-        return
-
+    '''
     def AddFFMpegCommand(self,ffmpeg_cmd):
         ffmpeg_cmd = ffmpeg_cmd.replace("'", "\"")
         self.ffmpeg_cmd_line.append(ffmpeg_cmd)
+
+    def AddFFMpegFilterComplex(self,filter_complex_option):
+        self.filter_complex_list.append(filter_complex_option)
+    '''
+    
+    def AddFFMpegCommand(self,ffmpeg_cmd):
+        ffmpeg_cmd = ffmpeg_cmd.replace("'", "\"")
+        self.input_videos[-1].ffmpeg_cmd_line.append(ffmpeg_cmd)
+
+    def AddFFMpegFilterComplex(self,filter_complex_option):
+        self.input_videos[-1].filter_complex_list.append(filter_complex_option)
 
 
 class InputVideoFile:
@@ -115,6 +130,8 @@ class InputVideoFile:
             self.rawpath = os.path.normpath( append_folder + filename )
 
         self.time_ranges = []
+        self.ffmpeg_cmd_line = []
+        self.filter_complex_list = []
 
     def AddTimeRange(self, start, end):
         self.time_ranges.append([ConvertToDateTime(start), ConvertToDateTime(end)])
@@ -127,12 +144,21 @@ class InputVideoFile:
 
     def GetTimeDiff(self, dt_start, dt_end):
         time_difference = dt_end.total_seconds() - dt_start.total_seconds()
+        if time_difference <= 0:
+            raise Exception("Time difference less than 0: " + str(time_difference))
         return datetime.timedelta(seconds=time_difference)
+
+    def AddFFMpegCommand(self,ffmpeg_cmd):
+        ffmpeg_cmd = ffmpeg_cmd.replace("'", "\"")
+        self.ffmpeg_cmd_line.append(ffmpeg_cmd)
+
+    def AddFFMpegFilterComplex(self,filter_complex_option):
+        self.filter_complex_list.append(filter_complex_option)
 
 
 # something i just noticed, i never have a value and items at the same time
 # i only have items or a value
-# so i use it exactly like valve's KeyValues, which it's based on
+# so i use it almost very similar to valve's KeyValues
 class ConfigBlock:
     def __init__(self, key, value):
         self.key = key
@@ -143,6 +169,7 @@ class ConfigBlock:
         self.items.append( item )
 
 
+# maybe try datetime.fromtimestamp( timestamp )
 def ConvertToDateTime(timestamp_str):
     time_split = timestamp_str.split(":")
     time_split.reverse()
@@ -442,29 +469,45 @@ def AddInputVideosToVideo( video_file, block_obj ):
 
         crc_list = []
         input_video_block.key = os.path.normpath( input_video_block.key )
-        if ":" in input_video_block.key and not os.sep in input_video_block.key:
+
+        if input_video_block.key == "$ffmpeg_cmd":
+            video_file.global_ffmpeg_cmd.append(input_video_block.value)
+            crc_list.append(GetCRC(input_video_block.value))
+
+        elif input_video_block.key == "$filter_complex":
+            video_file.global_filter_complex.append(input_video_block.value)
+            crc_list.append(GetCRC(input_video_block.value))
+
+        elif ":" in input_video_block.key and not os.sep in input_video_block.key:
             video_file.AddInputVideo( video_file.rawpath )
-            video_file.AddTimeRange(input_video_block.key, input_video_block.value)
-
             crc_list.append( GetCRC(video_file.rawpath) )
-            crc_list.append( GetCRC(input_video_block.key) )
-            crc_list.append( GetCRC(input_video_block.value) )
-
-        elif input_video_block.key == "$ffmpeg_cmd":
-            video_file.AddFFMpegCommand(input_video_block.value)
-            crc_list.append( GetCRC(input_video_block.value) )
+            crc_list = AddInputVideoSetting( video_file, input_video_block, crc_list )
 
         else:
-            video_file.AddInputVideo( input_video_block.key )
-
-            for time_range_block in input_video_block.items:
-                video_file.AddTimeRange(time_range_block.key, time_range_block.value)
-
-                crc_list.append( GetCRC(time_range_block.key) )
-                crc_list.append( GetCRC(time_range_block.value) )
+            video_file.AddInputVideo(input_video_block.key, False)
+            for in_video_item in input_video_block.items:
+                crc_list = AddInputVideoSetting( video_file, in_video_item, crc_list )
 
         video_file.crc_list.extend( crc_list )
     return
+
+
+def AddInputVideoSetting( video_file, in_video_item, crc_list ):
+    if in_video_item.key == "$ffmpeg_cmd":
+        video_file.AddFFMpegCommand(in_video_item.value)
+        crc_list.append(GetCRC(in_video_item.value))
+    
+    elif in_video_item.key == "$filter_complex":
+        video_file.AddFFMpegFilterComplex(in_video_item.value)
+        crc_list.append(GetCRC(in_video_item.value))
+    
+    else:
+        video_file.AddTimeRange(in_video_item.key, in_video_item.value)
+        
+        crc_list.append(GetCRC(in_video_item.key))
+        crc_list.append(GetCRC(in_video_item.value))
+            
+    return crc_list
 
 
 # some shitty thing to print what we just parsed
@@ -521,7 +564,7 @@ def RunFFMpegConCat(sub_video_list, out_video):
     os.remove("temp.txt")
 
 
-def RunFFMpegSubVideo( time_range_number, input_video, temp_video, ffmpeg_cmds ):
+def RunFFMpegSubVideo( time_range_number, input_video, temp_video ):
 
     dt_start, dt_end, dt_diff = input_video.GetTimeRange( time_range_number )
     time_start = str(dt_start)
@@ -531,6 +574,7 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video, ffmpeg_cmds )
     ffmpeg_command = [
         ffmpeg_bin + "ffmpeg",
         "-y",
+        "-hide_banner",
         "-ss",
         time_start,
         '-i "' + input_video.abspath + '"'
@@ -565,20 +609,30 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video, ffmpeg_cmds )
 
     # ffmpeg_command.append("-vf colormatrix bt709")
 
+    # Filter complex stuff here:
+    filter_complex = [ "-filter_complex \"", *input_video.filter_complex_list ]
+
     # this is really just a hardcoded hack since this is what i use it for lmao
     if audio_tracks == 5:
-        ffmpeg_command.append("-filter_complex \"[0:a:1][0:a:2]amerge[out]\"")
-        ffmpeg_command.append("-map \"[out]\"")
+        filter_complex.append("[0:a:1][0:a:2]amerge[out]\"")
     elif audio_tracks == 2:
-        # Shadowplay - PAL:
-        ffmpeg_command.append("-colorspace bt470bg -color_primaries bt470bg -color_trc gamma28")
-
-        ffmpeg_command.append("-filter_complex \"[0:a:0][0:a:1]amerge[out]\"")
-        ffmpeg_command.append("-map \"[out]\"")
+        filter_complex.append("[0:a:0][0:a:1]amerge[out]\"")
     else:
-        # Shadowplay - PAL:
-        ffmpeg_command.append("-colorspace bt470bg -color_primaries bt470bg -color_trc gamma28")
         ffmpeg_command.append("-map 0:a")
+
+    if len(filter_complex) > 1:
+        ffmpeg_command.append( ' '.join(filter_complex) )
+        
+        # TODO: maybe move these hard coded colorspace things to maybe a color command in the config?
+        #  $colors "full" / "limited"
+        if audio_tracks == 5:
+            ffmpeg_command.append( "-map \"[out]\"" )
+            ffmpeg_command.append("-pix_fmt yuvj420p")
+            
+        else:
+            ffmpeg_command.append( "-map \"[out]\"" )
+            # Shadowplay - PAL:
+            ffmpeg_command.append("-colorspace bt470bg -color_primaries bt470bg -color_trc gamma28")
 
     # NTSC - OBS?:
     # ffmpeg_command.append("-colorspace smpte170m -color_primaries smpte170m -color_trc smpte170m")
@@ -600,8 +654,7 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video, ffmpeg_cmds )
     ffmpeg_command.append("-t " + time_diff)
 
     # any custom commands
-    for ffmpeg_cmd in ffmpeg_cmds:
-        ffmpeg_command.append(ffmpeg_cmd)
+    ffmpeg_command.extend( input_video.ffmpeg_cmd_line )
 
     # output file
     ffmpeg_command.append('"' + temp_video + '"')
@@ -708,17 +761,22 @@ def GetAudioTrackCount( video ):
 
 
 def StartEncodingVideos( video_list ):
+    
+    temp_folder = "TEMP" + os.sep + str(datetime.datetime.now()) + os.sep
 
-    temp_path = os.path.dirname(os.path.realpath(__file__)) + os.sep + "TEMP" + os.sep
+    temp_folder = temp_folder.replace(":", "-").replace(".", "-")
+
+    temp_path = os.path.dirname(os.path.realpath(__file__)) + os.sep + temp_folder
     CreateDirectory(temp_path)
 
     for output_video in video_list:
         if output_video.skip:
             continue
 
-        MakeCRCFile(root_folder, output_video.filename, output_video.crc_list)
+        # if ffmpeg gets an error, we won't know, so we delete the file just in case
         # TODO: if this gets a PermissionError and we run again, it will skip, need to fix
         DeleteFile( output_video.full_path )
+        MakeCRCFile(root_folder, output_video.filename, output_video.crc_list)
 
         # print("Output Video: " + output_video.full_path.replace(default_output_folder, "") + "\n")
         # print("Output Video: " + output_video.path + "\n")
@@ -740,7 +798,8 @@ def StartEncodingVideos( video_list ):
                 temp_video = temp_path + str(temp_video_num) + ".mkv"
                 temp_video_list.append( temp_video )
 
-                RunFFMpegSubVideo( time_range_number, input_video, temp_video, output_video.ffmpeg_cmd_line )
+                RunFFMpegSubVideo( time_range_number, input_video, temp_video )
+                                   # output_video.ffmpeg_cmd_line, output_video.filter_complex_list )
                 time_range_number += 1
                 temp_video_num += 1
 
@@ -757,6 +816,8 @@ def StartEncodingVideos( video_list ):
 
         if date_modified:
             ReplaceDateModified(output_video.full_path, date_modified)
+            
+        # MakeCRCFile(root_folder, output_video.filename, output_video.crc_list)
 
         print("-----------------------------------------------------------")
 
@@ -841,7 +902,8 @@ if __name__ == "__main__":
             else:
                 ffmpeg_bin = ffmpeg_bin + os.sep
     else:
-        print("unknown ffmpeg path, use -ffmpeg_bin \"PATH\"")
+        # default ffmpeg bin path
+        ffmpeg_bin = "D:/demez_archive/video_editing/ffmpeg/current/bin/"
 
     config_blocks = ReadConfig( config_filepath )
 
