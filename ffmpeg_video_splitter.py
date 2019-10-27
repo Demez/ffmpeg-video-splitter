@@ -6,11 +6,16 @@ import datetime
 import shutil
 import hashlib
 
+# screw this old lexer
+import kv_lexer as lexer
+
 
 # how the awful crc checking works:
 # it makes a crc for every time range, input video name, output video name, verbose, and final encode
 # and dumps it all to a file if it doesn't exist
 # it scans that file to see if any crc matches what we have
+
+# TODO: add hash checking for dates and stuff
 
 
 def FindItemInList(search_list, item, return_value=False):
@@ -37,13 +42,13 @@ def FindCommandValue( arg, short_arg ):
     return value
 
 
+# ok, what the fuck am i doing with all these paths?
 class VideoFile:
     def __init__(self, filename, root_folder, config_folder, output_folder, force_file_ext):
 
         self.output_folder = output_folder
 
-        self.rawpath = os.path.normpath( filename )
-
+        self.raw_path = os.path.normpath(filename)
         self.path = os.path.normpath(output_folder + os.sep + filename)
         
         if force_file_ext:
@@ -67,12 +72,16 @@ class VideoFile:
         self.root_config_folder = config_folder
         self.root_video_folder = root_folder
         self.input_videos = []
+        self.time = None
 
         self.global_ffmpeg_cmd = []
         self.global_filter_complex = []
 
         self.skip = False  # this will be set to true if the crc check fails
         self.crc_list = []
+        
+        # dumb temp thing that will be here for 40 years
+        self.use_filter_complex_default = True
 
     def AddInputVideo(self, input_video_filename, check=True):
 
@@ -95,15 +104,6 @@ class VideoFile:
         # maybe i should use a filename and get the index instead? idk
         input_video = self.input_videos[-1]
         input_video.AddTimeRange(start, end)
-
-    '''
-    def AddFFMpegCommand(self,ffmpeg_cmd):
-        ffmpeg_cmd = ffmpeg_cmd.replace("'", "\"")
-        self.ffmpeg_cmd_line.append(ffmpeg_cmd)
-
-    def AddFFMpegFilterComplex(self,filter_complex_option):
-        self.filter_complex_list.append(filter_complex_option)
-    '''
     
     def AddFFMpegCommand(self,ffmpeg_cmd):
         ffmpeg_cmd = ffmpeg_cmd.replace("'", "\"")
@@ -120,33 +120,27 @@ class InputVideoFile:
         else:
             self.abspath = os.path.normpath( root_folder + filename )
 
-        self.filename = self.abspath.rsplit( os.sep, 1 )[1]
+        self.filename = os.path.basename(self.abspath)
 
         # bad idea?
         if os.path.isabs(filename):
-            self.rawpath = os.path.normpath( filename )
+            self.raw_path = os.path.normpath(filename)
         else:
             append_folder = ''.join( root_folder.split( config_folder, 1 ) )
-            self.rawpath = os.path.normpath( append_folder + filename )
+            self.raw_path = os.path.normpath(append_folder + filename)
 
         self.time_ranges = []
         self.ffmpeg_cmd_line = []
         self.filter_complex_list = []
 
     def AddTimeRange(self, start, end):
-        self.time_ranges.append([ConvertToDateTime(start), ConvertToDateTime(end)])
+        self.time_ranges.append([ConvertTimestampToTimeDelta(start), ConvertTimestampToTimeDelta(end)])
 
     def GetTimeRange(self, list_index):
         dt_start = self.time_ranges[list_index][0]
         dt_end = self.time_ranges[list_index][1]
-        dt_diff = self.GetTimeDiff(dt_start, dt_end)
+        dt_diff = GetTimeDiff(dt_start, dt_end)
         return dt_start, dt_end, dt_diff
-
-    def GetTimeDiff(self, dt_start, dt_end):
-        time_difference = dt_end.total_seconds() - dt_start.total_seconds()
-        if time_difference <= 0:
-            raise Exception("Time difference less than 0: " + str(time_difference))
-        return datetime.timedelta(seconds=time_difference)
 
     def AddFFMpegCommand(self,ffmpeg_cmd):
         ffmpeg_cmd = ffmpeg_cmd.replace("'", "\"")
@@ -154,33 +148,37 @@ class InputVideoFile:
 
     def AddFFMpegFilterComplex(self,filter_complex_option):
         self.filter_complex_list.append(filter_complex_option)
+        
+        
+def GetTimeDiff(dt_start, dt_end):
+    time_difference = dt_end.total_seconds() - dt_start.total_seconds()
+    if time_difference <= 0:
+        raise Exception("Time difference less than 0: " + str(time_difference))
+    return datetime.timedelta(seconds=time_difference)
 
 
-# something i just noticed, i never have a value and items at the same time
-# i only have items or a value
-# so i use it almost very similar to valve's KeyValues
-class ConfigBlock:
-    def __init__(self, key, value):
-        self.key = key
-        self.value = value
-        self.items = []
-
-    def AddItem( self, item ):
-        self.items.append( item )
-
-
-# maybe try datetime.fromtimestamp( timestamp )
-def ConvertToDateTime(timestamp_str):
+def ConvertTimestampToTimeDelta(timestamp_str):
     time_split = timestamp_str.split(":")
     time_split.reverse()
-
-    seconds = float(time_split[0])
-    minutes = int(time_split[1])
-    hours = int(time_split[2])
-
-    time_dt = datetime.timedelta(hours=hours, minutes=minutes, seconds=seconds)
-
+    
+    total_seconds = float(time_split[0])
+    
+    for index in range(1, len(time_split)):
+        total_seconds += int(time_split[index]) * (60 ** index)
+    
+    time_dt = datetime.timedelta(seconds=total_seconds)
+    
     return time_dt
+
+
+def ConvertToDateTime(datetime_str):
+    date, time = datetime_str.split(" ", 1)
+    year, month, day = date.split('-')
+    hour, minute, second = time.split('-')
+    
+    date_time = datetime.datetime(int(year), int(month), int(day), int(hour), int(minute), int(second))
+    
+    return date_time
 
 
 def CreateDirectory(directory):
@@ -200,224 +198,14 @@ def DeleteFile( path ):
         pass
 
 
-def CleanFile(config):
-
-    in_comment = False
-    new_config = []
-    for line_num, line in enumerate(config):
-
-        # removes all multi-line comments from the line
-        line = re.sub( r'/\*.*?\*/', r'', line )
-
-        if in_comment:
-            if "*/" in line:
-                line = line.split("*/", 1)[1]
-                in_comment = False
-            else:
-                continue
-
-        if "/*" in line:
-            line = line.split("/*", 1)[0]
-            in_comment = True
-
-        line = line.split("//", 1)[0]
-
-        if not line:
-            continue
-
-        # replace tabs with spaces
-        # this can cause a lot of spaces to be added, could be bad
-        line = ' '.join(line.split("\t"))
-
-        # now split the line by quotes
-        line_split = _RemoveQuotesAndSplitLine( line )
-
-        if not line_split:
-            continue
-
-        new_config.append( line_split )
-
-    return new_config
-
-
-# remove quotes in the string if there is any
-def _RemoveQuotesAndSplitLine( line ):
-
-    # add a gap in between these if they exist just in case
-    # so we can have no spaces in the actual file if we want
-    line = line.replace( "{", " { ")
-    line = line.replace( "}", " } ")
-    line = line.replace( ",", " ")
-    line = line.replace( "\"\"", "\" \"")  # add a space in between any quotes that may be right next to each other
-
-    line_split = []
-    raw_line_split = line.split(" ")
-
-    str_num = 0
-    while str_num < len( raw_line_split ):
-        string = raw_line_split[ str_num ]
-
-        if string.startswith( '"' ):
-
-            if string.endswith( '"' ):
-                str_len = len( string )
-                string = string[ 1: str_len-1 ]
-
-            else:
-                quote = string[1:]  # strip the start quote off
-                quote_str_num = str_num + 1
-
-                # this will keep adding strings together until one of them ends with a quote
-                while not quote.endswith( "\"" ):
-                    quote += " " + raw_line_split[ quote_str_num ]
-                    quote_str_num += 1
-
-                str_num = quote_str_num - 1
-                string = quote[:-1]  # strip the end quote off
-
-        elif not string:
-            str_num += 1
-            continue
-
-        line_split.append(string)
-        str_num += 1
-
-    return line_split
-
-
-# Re-Formats the config, so no more blocks in one single line
-def _FormatConfigBlocks( config ):
-
-    new_config = []
-    for line_num, split_line in enumerate( config ):
-
-        if "{" in split_line or "}" in split_line:
-            new_split_line = []
-            for item in split_line:
-                if "{" in item or "}" in item:
-                    # what about if the length is over 2?
-                    if new_split_line:
-                        new_config.append( new_split_line )
-                    new_config.append( [item] )
-                    new_split_line = []
-                elif len(new_split_line) >= 2:
-                    new_config.append( new_split_line )
-                    new_split_line = []
-                    new_split_line.append( item )
-
-                else:
-                    new_split_line.append( item )
-
-            # new_config.append( new_split_line )
-
-        else:
-            new_config.append( split_line )
-
-    return new_config
-
-
-def CreateConfigBlocks( config ):
-    config_blocks = []
-
-    line_num = 0
-    while line_num < len(config):
-
-        line_num, block = CreateConfigBlock(config, line_num)
-        block = CreateConfigBlockObject(block)
-        config_blocks.append(block)
-
-        continue
-
-    return config_blocks
-
-
-def CreateConfigBlock( config, line_number ):
-
-    block_depth_num = 0
-
-    block = [config[line_number]]
-    if config[line_number] == ['{']:
-        block_depth_num = 1
-
-    line_number += 1
-
-    while line_number < len(config):
-
-        current_line = config[ line_number ]
-
-        if len(block[-1]) < 1 and block[-1][-1] != "\\":
-            if block_depth_num == 0 and current_line == []:
-                break
-
-        if current_line:
-            if (current_line == ['{']) or (block_depth_num != 0):
-                block.append(current_line)
-
-            elif len(block[-1]) > 1:
-                if block_depth_num == 0:
-                    # this is a single line block
-                    break
-
-            else:
-                break
-
-        if "{" in current_line:
-            block_depth_num += 1
-
-        if "}" in current_line:
-            block_depth_num -= 1
-
-        line_number += 1
-
-    return line_number, block
-
-
-def CreateConfigBlockObject( block ):
-
-    try:
-        value = block[0][1]
-    except IndexError:
-        value = None
-
-    block_obj = ConfigBlock(block[0][0], value)
-
-    if len(block) > 1:
-
-        block_line_num = 1
-        while block_line_num < len(block):
-
-            if block[block_line_num] != [] and block[block_line_num][0] != '{' and block[block_line_num][0] != '}':
-
-                block_line_num, sub_block = CreateConfigBlock(block, block_line_num)
-
-                if isinstance(sub_block, list):
-                    sub_block = CreateConfigBlockObject(sub_block)
-                    block_obj.AddItem(sub_block)
-                    continue
-
-            block_line_num += 1
-
-    return block_obj
-
-
-def ReadConfig( config_filepath ):
-    with open(config_filepath, mode="r", encoding="utf-8") as config_file:
-        config = config_file.read().splitlines()
-
-    config = CleanFile( config )
-    config = _FormatConfigBlocks( config )
-    config_blocks = CreateConfigBlocks( config )
-
-    return config_blocks
-
-
-def ParseConfig( root_folder, config_blocks, base_output_folder, config_folder, final_encode ):
+def ParseConfig( config_blocks, base_output_folder, config_folder ):
     if verbose:
         print( "Parsing Config" )
 
     full_root_folder = config_folder
     full_output_folder = base_output_folder
     force_file_ext = False
+    time_stamp = None
 
     video_list = []
     for block_obj in config_blocks:
@@ -435,7 +223,15 @@ def ParseConfig( root_folder, config_blocks, base_output_folder, config_folder, 
         elif block_obj.key == "$force_file_ext":
             force_file_ext = block_obj.value
 
-        elif block_obj.key == "$input_video_folder":
+        elif block_obj.key == "$include":
+            include_config = lexer.ReadFile(block_obj.value)
+            config_path = os.path.join(full_root_folder, os.path.split(block_obj.value)[0])
+
+            include_video_list, base_output_folder = ParseConfig(include_config, base_output_folder, config_path)
+
+            video_list.extend(include_video_list)
+
+        elif block_obj.key in {"$input_video_folder", "$input_folder"}:
             if os.path.isabs( block_obj.value ):
                 full_root_folder = os.path.normpath( block_obj.value ) + os.sep
             else:
@@ -453,12 +249,12 @@ def ParseConfig( root_folder, config_blocks, base_output_folder, config_folder, 
             video_list.append(video_file)
 
             video_file.crc_list.append(GetCRC(base_output_folder))
-            video_file.crc_list.append( GetCRC( str(final_encode) ) )
+            video_file.crc_list.append(GetCRC(str(final_encode)))
 
             if not os.path.isfile(video_file.full_path):
                 continue
 
-            elif not CheckCRC(root_folder, video_file, video_file.crc_list):
+            elif not CheckCRC(video_file, video_file.crc_list):
                 video_file.skip = True
 
     return video_list, base_output_folder
@@ -470,17 +266,27 @@ def AddInputVideosToVideo( video_file, block_obj ):
         crc_list = []
         input_video_block.key = os.path.normpath( input_video_block.key )
 
-        if input_video_block.key == "$ffmpeg_cmd":
+        if input_video_block.key == "$time":
+            # TODO: maybe if the value is 'self', use the input video date modified?
+            #  you might not be able to get a date modified due to no input videos being added, oof
+            #  and what if there is more than one video?
+            time_stamp = ConvertToDateTime(input_video_block.value)
+            video_file.time = time_stamp
+
+        elif input_video_block.key == "$ffmpeg_cmd":
             video_file.global_ffmpeg_cmd.append(input_video_block.value)
             crc_list.append(GetCRC(input_video_block.value))
+
+        elif input_video_block.key == "$no_filter_complex_default":
+            video_file.use_filter_complex_default = False
 
         elif input_video_block.key == "$filter_complex":
             video_file.global_filter_complex.append(input_video_block.value)
             crc_list.append(GetCRC(input_video_block.value))
 
         elif ":" in input_video_block.key and not os.sep in input_video_block.key:
-            video_file.AddInputVideo( video_file.rawpath )
-            crc_list.append( GetCRC(video_file.rawpath) )
+            video_file.AddInputVideo( video_file.raw_path )
+            crc_list.append( GetCRC(video_file.raw_path) )
             crc_list = AddInputVideoSetting( video_file, input_video_block, crc_list )
 
         else:
@@ -511,7 +317,7 @@ def AddInputVideoSetting( video_file, in_video_item, crc_list ):
 
 
 # some shitty thing to print what we just parsed
-def PrintTimestampsFile( video_list, out_folder, final_encode, verbose = False ):
+def PrintTimestampsFile( video_list, out_folder ):
     cmd_bar_line = "-----------------------------------------------------------"
 
     print( cmd_bar_line )
@@ -523,7 +329,7 @@ def PrintTimestampsFile( video_list, out_folder, final_encode, verbose = False )
             print( out_video.path )
 
             for in_video in out_video.input_videos:
-                print( "    " + in_video.rawpath )
+                print( "    " + in_video.raw_path )
 
                 for time_range in in_video.time_ranges:
                     print( "        " + str(time_range[0]) + " - " + str(time_range[1]) )
@@ -539,56 +345,65 @@ def PrintTimestampsFile( video_list, out_folder, final_encode, verbose = False )
     return
 
 
-def RunFFMpegConCat(sub_video_list, out_video):
+def RunFFMpegConCat(temp_path, sub_video_list, out_video):
     # stuff for ffmpeg concat shit
-    with open("temp.txt", "w", encoding="utf-8") as temp_file:
+    temp_file = temp_path + "temp.txt"
+    with open(temp_file, "w", encoding="utf-8") as temp_file_io:
         for sub_video in sub_video_list:
-            temp_file.write("file '" + sub_video + "'\n")
+            temp_file_io.write("file '" + sub_video + "'\n")
+
+    metadata = []
+    if out_video.time:
+        metadata.append('-metadata date="' + str(out_video.time).replace(':', '-') + '"')
 
     ffmpeg_command = (
-        ffmpeg_bin + "ffmpeg",
-        "-y",
-        "-safe 0",
-        "-f concat",
-        "-i temp.txt",
-        "-c copy",
-        "-map 0",
+        ffmpeg_bin + "ffmpeg -y -hide_banner",
+        "-safe 0 -f concat -i \"" + temp_file + '"',
+        "-c copy -map 0",
+        *metadata,
         '"' + out_video.full_path + '"'
     )
 
-    RunFFMpeg(' '.join(ffmpeg_command))
+    RunFFMpeg(out_video.full_path, ' '.join(ffmpeg_command))
 
     if verbose:
         print("Created Output Video")
+    
+    if out_video.time:
+        ReplaceDateModified(out_video.full_path, out_video.time.timestamp())
+        if verbose:
+            print("Changed Date Modified")
+    
+    os.remove(temp_file)
 
-    os.remove("temp.txt")
 
-
-def RunFFMpegSubVideo( time_range_number, input_video, temp_video ):
+def RunFFMpegSubVideo( time_range_number, input_video, temp_video, use_filter_complex_default ):
 
     dt_start, dt_end, dt_diff = input_video.GetTimeRange( time_range_number )
     time_start = str(dt_start)
     time_end = str(dt_end)
     time_diff = str(dt_diff)
+    
+    video_len = GetVideoLength(input_video.abspath)
+    
+    if video_len < dt_start:
+        raise Exception( "start time bad" )
 
     ffmpeg_command = [
         ffmpeg_bin + "ffmpeg",
-        "-y",
-        "-hide_banner",
-        "-ss",
-        time_start,
-        '-i "' + input_video.abspath + '"'
+        "-y -hide_banner",
+        "-ss " + time_start,
+        '-i "' + input_video.abspath + '"',
+        "-map 0:v"
     ]
 
     # get audio track count
     audio_tracks = GetAudioTrackCount(input_video.abspath)
 
-    ffmpeg_command.append("-map 0:v")
-
     if final_encode:
         ffmpeg_command.append("-c:v libx265")
         ffmpeg_command.append("-crf 8")
-        ffmpeg_command.append("-preset slow")  # medium
+        ffmpeg_command.append("-preset slow")
     else:
         ffmpeg_command.append("-c:v libx264")
         ffmpeg_command.append("-crf 24")
@@ -610,29 +425,35 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video ):
     # ffmpeg_command.append("-vf colormatrix bt709")
 
     # Filter complex stuff here:
-    filter_complex = [ "-filter_complex \"", *input_video.filter_complex_list ]
+    filter_complex = []
 
     # this is really just a hardcoded hack since this is what i use it for lmao
-    if audio_tracks == 5:
-        filter_complex.append("[0:a:1][0:a:2]amerge[out]\"")
-    elif audio_tracks == 2:
-        filter_complex.append("[0:a:0][0:a:1]amerge[out]\"")
+    if use_filter_complex_default:
+        if audio_tracks == 5 or audio_tracks == 4:
+            filter_complex.append("[0:a:1][0:a:2]amerge[audio_combine]")
+        elif audio_tracks == 2:
+            filter_complex.append("[0:a:0][0:a:1]amerge[audio_combine]")
+        else:
+            ffmpeg_command.append("-map 0:a")
     else:
         ffmpeg_command.append("-map 0:a")
-
-    if len(filter_complex) > 1:
-        ffmpeg_command.append( ' '.join(filter_complex) )
         
-        # TODO: maybe move these hard coded colorspace things to maybe a color command in the config?
-        #  $colors "full" / "limited"
-        if audio_tracks == 5:
-            ffmpeg_command.append( "-map \"[out]\"" )
-            ffmpeg_command.append("-pix_fmt yuvj420p")
-            
-        else:
-            ffmpeg_command.append( "-map \"[out]\"" )
-            # Shadowplay - PAL:
-            ffmpeg_command.append("-colorspace bt470bg -color_primaries bt470bg -color_trc gamma28")
+    filter_complex += input_video.filter_complex_list
+
+    if filter_complex:
+        ffmpeg_command.append( '-filter_complex "' + ';'.join(filter_complex) + '"' )
+        
+        if use_filter_complex_default and (audio_tracks == 5 or audio_tracks == 4 or audio_tracks == 2):
+            ffmpeg_command.append( "-map \"[audio_combine]\"" )
+        
+    # TODO: maybe move these hard coded colorspace things to maybe a color command in the config?
+    #  $colors "full" / "limited"
+    if audio_tracks == 5:
+        ffmpeg_command.append("-pix_fmt yuvj420p")
+        
+    elif audio_tracks == 4 or audio_tracks == 2:
+        # Shadowplay - PAL - bad colors:
+        ffmpeg_command.append("-colorspace bt470bg -color_primaries bt470bg -color_trc gamma28")
 
     # NTSC - OBS?:
     # ffmpeg_command.append("-colorspace smpte170m -color_primaries smpte170m -color_trc smpte170m")
@@ -642,8 +463,6 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video ):
     # doesn't do anything?
     # ffmpeg_command.append("-pix_fmt yuvj420p")
     # ffmpeg_command.append("-pix_fmt yuv420p")
-
-    # ffmpeg_command.append("-c:a flac")
 
     ffmpeg_command.append("-c:a libvorbis")
     # This is a bug in ffmpeg, so im using libvorbis for now until this is fixed
@@ -665,7 +484,7 @@ def RunFFMpegSubVideo( time_range_number, input_video, temp_video ):
         print("Start: " + time_start + " - End: " + time_end)
         print("Total Frames: " + str(total_frames))
 
-    RunFFMpeg(' '.join(ffmpeg_command), total_frames)
+    RunFFMpeg(temp_video, ' '.join(ffmpeg_command), total_frames)
 
     return
 
@@ -682,13 +501,8 @@ def GetFrameRate( video_path ):
 
     output = subprocess.check_output(' '.join(command), shell=True)
 
-    output = str(output).replace( "\\r", "" )
-    output = output.replace( "\\n", "" )
-    output = output.replace( "\'", "" )
-    output = output.replace( "b", "" )
-
+    output = str(output).replace("\\r", "").replace("\\n", "").replace("\'", "")[1:]
     numerator, denominator = output.split( "/" )
-
     frame_rate = int(numerator) / int(denominator)
 
     return frame_rate
@@ -698,47 +512,49 @@ def GetTotalFrameCount( dt_time_length, frame_rate ):
     return dt_time_length.total_seconds() * frame_rate
 
 
-def RunFFMpeg( cmd, total_frames = None ):
+def RunFFMpeg( out_file, cmd, total_frames=None ):
 
     if raw_ffmpeg:
         subprocess.run( cmd )
+        if not os.path.isfile(out_file) or os.path.getsize(out_file) == 0:
+            raise Exception("ffmpeg died")
     else:
-        ffmpeg_run = subprocess.Popen( cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True )
+        ffmpeg_run = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
 
         if total_frames:
             UpdateProgressBar( 0.00, 52 )  # start it at 0
 
+        ffmpeg_output = ''
         for line in ffmpeg_run.stdout:
-
+            ffmpeg_output += line
             if total_frames:
                 if "frame=" in line:
                     # use the total time range and divide it by ffmpeg's current time in the encode to get a percentage
-                    line_split = line.split( "frame= " )[1]
-                    current_frame = line_split.split( " fps=" )[0]  # wrong
+                    current_frame = line.split("frame= ")[1].split(" fps=")[0]
                     percentage = GetPercent( int(current_frame),  total_frames, 2 )
                     UpdateProgressBar( percentage, 52 )
-                    # IDEA: replace the progress bar with "\n" once it's done?
+                    # TODO: IDEA: replace the progress bar with "\n" once it's done?
 
         if total_frames:
             UpdateProgressBar(100.0, 52)  # usually it finishes before we can catch the last frame
-            # print( "" )  # leave a space for the next one
+            
+        if not os.path.isfile(out_file) or os.path.getsize(out_file) == 0:
+            print()
+            raise Exception("ffmpeg died - output:\n\n" + ffmpeg_output)
 
 
 def GetPercent( current_frame, total_frames, round_num ):
-    return round( ( current_frame / total_frames ) * 100, round_num )
+    return round(( current_frame / total_frames ) * 100, round_num)
 
 
 def UpdateProgressBar( percentage, width ):
-    percent = percentage / 100
-
-    block = int(round( width * percent ))
+    block = int(round(width * (percentage / 100)))
     text = "\r{0} {1}%".format( "█" * block + "░"*( width - block ), percentage )
     sys.stdout.write( text )
     sys.stdout.flush()
 
 
 def GetAudioTrackCount( video ):
-
     ffprobe_command = (
         ffmpeg_bin + "ffprobe",
         "-loglevel error",
@@ -747,7 +563,7 @@ def GetAudioTrackCount( video ):
         '"' + video + '"',
     )
 
-    output = subprocess.check_output( ' '.join( ffprobe_command ), shell = True )
+    output = subprocess.check_output( ' '.join( ffprobe_command ), shell=True )
 
     # now clean up that output and shove it into a list
     stream_list = str( output ).split( "\\n" )
@@ -760,37 +576,39 @@ def GetAudioTrackCount( video ):
     return audio_tracks
 
 
-def StartEncodingVideos( video_list ):
+def GetVideoLength(video):
+    ffprobe_command = ffmpeg_bin + \
+                      "ffprobe -threads 6 -v error -show_entries format=duration " \
+                      "-of default=noprint_wrappers=1:nokey=1 \"" + video + '"'
     
+    output = subprocess.check_output(ffprobe_command, shell=True)
+    
+    # clean up the output
+    str_video_length = str(output).split("\\n")[0].split("\\r")[0].split("b\'")[1]
+    
+    if str_video_length == "N/A":
+        return None
+    
+    return ConvertTimestampToTimeDelta(str_video_length)
+
+
+def StartEncodingVideos( video_list ):
     temp_folder = "TEMP" + os.sep + str(datetime.datetime.now()) + os.sep
-
     temp_folder = temp_folder.replace(":", "-").replace(".", "-")
-
-    temp_path = os.path.dirname(os.path.realpath(__file__)) + os.sep + temp_folder
+    temp_path = root_folder + temp_folder
     CreateDirectory(temp_path)
 
     for output_video in video_list:
         if output_video.skip:
             continue
-
-        # if ffmpeg gets an error, we won't know, so we delete the file just in case
-        # TODO: if this gets a PermissionError and we run again, it will skip, need to fix
-        DeleteFile( output_video.full_path )
-        MakeCRCFile(root_folder, output_video.filename, output_video.crc_list)
-
-        # print("Output Video: " + output_video.full_path.replace(default_output_folder, "") + "\n")
-        # print("Output Video: " + output_video.path + "\n")
+            
         print(output_video.path)
-
-        date_modified = None
-        if len(output_video.input_videos) == 1:
-            date_modified = GetDateModified(output_video.input_videos[0].abspath)
 
         temp_video_list = []
         temp_video_num = 0
         for input_video in output_video.input_videos:
 
-            print("\nSplitting: " + input_video.filename)
+            print("\nInput: " + input_video.filename)
 
             time_range_number = 0
             while time_range_number < len(input_video.time_ranges):
@@ -798,50 +616,44 @@ def StartEncodingVideos( video_list ):
                 temp_video = temp_path + str(temp_video_num) + ".mkv"
                 temp_video_list.append( temp_video )
 
-                RunFFMpegSubVideo( time_range_number, input_video, temp_video )
-                                   # output_video.ffmpeg_cmd_line, output_video.filter_complex_list )
+                RunFFMpegSubVideo(time_range_number, input_video, temp_video, output_video.use_filter_complex_default)
+                
                 time_range_number += 1
                 temp_video_num += 1
 
                 if time_range_number < len(input_video.time_ranges):
-                    print( "" )
-            print( "" )
+                    print()
+            print()
 
         CreateDirectory( output_video.full_output_path )
 
         # now combine all the sub videos together
-        RunFFMpegConCat(temp_video_list, output_video)
+        RunFFMpegConCat(temp_path, temp_video_list, output_video)
+        print()
 
-        print("")
-
-        if date_modified:
-            ReplaceDateModified(output_video.full_path, date_modified)
-            
-        # MakeCRCFile(root_folder, output_video.filename, output_video.crc_list)
+        MakeCRCFile(output_video.filename, output_video.crc_list)
 
         print("-----------------------------------------------------------")
 
-    RemoveDirectory(temp_path)  # has an issue on linux
+    RemoveDirectory(temp_path)  # TODO: has an issue on linux
 
     return
 
 
-def CheckCRC( root_dir, video_obj, crc_list ):
-
+def CheckCRC( video_obj, crc_list ):
     if verbose:
-        print( "Checking CRC: " + video_obj.filename + ".crc" )
+        print( "Checking Hash: " + video_obj.filename + ".crc" )
 
-    video_crc_path = os.path.join( root_dir, "crcs", video_obj.filename + ".crc" )
+    video_crc_path = os.path.join( root_folder, "crcs", video_obj.filename + ".crc" )
 
     if os.path.isfile(video_crc_path):
-        crc_file = ReadConfig(video_crc_path)  # this might be slowing this down, but idc
+        with open(video_crc_path, mode="r", encoding="utf-8") as file:
+            crc_file = file.read().splitlines()
 
         valid_crcs = []
-        for crc_line in crc_file:
-            video_crc = crc_line.key
-
+        for video_crc in crc_file:
             if video_crc not in crc_list:
-                print("Invalid CRC: " + video_obj.filename + ".crc")
+                # print("Invalid Hash: " + video_obj.filename + ".crc")
                 return True
             else:
                 valid_crcs.append( video_crc )
@@ -849,11 +661,11 @@ def CheckCRC( root_dir, video_obj, crc_list ):
         else:
             if valid_crcs != crc_list:
                 if verbose:
-                    print( "    Not all CRC's validated" )
+                    print( "    Not all Hash's validated" )
                 return True
             return False
     else:
-        print("CRC File does not exist: " + video_crc_path)
+        # print("Hash File does not exist: " + video_crc_path)
         return True
 
 
@@ -861,20 +673,17 @@ def GetCRC(string):
     return hashlib.md5(string.encode('utf-8')).hexdigest()
 
 
-def MakeCRCFile( root_dir, video_name, crc_list ):
-
-    video_crc_path = os.path.join(root_dir, "crcs")
+def MakeCRCFile( video_name, crc_list ):
+    video_crc_path = os.path.join(root_folder, "crcs")
     CreateDirectory( video_crc_path )
     video_crc_path += os.sep + video_name + ".crc"
 
     with open( video_crc_path, mode="w", encoding="utf-8" ) as crc_file:
-        for crc in crc_list:
-            crc_file.write( crc + "\n" )
+        crc_file.write( '\n'.join(crc_list) )
     return
 
 
 def GetDateModified( file ):
-
     if os.name == "nt":
         return os.path.getmtime(file)
     else:
@@ -885,10 +694,36 @@ def ReplaceDateModified( file, mod_time ):
     if verbose:
         print( "Replacing Date Modified" )
     os.utime( file, (mod_time, mod_time) )
+    
+    
+def main():
+    config_blocks = lexer.ReadFile(config_filepath)
+
+    # base_output_folder = config_folder + "output" + os.sep
+    base_output_folder = "output" + os.sep
+
+    if os.sep not in config_filepath:
+        config_folder = os.getcwd() + os.sep
+    else:
+        config_folder = config_filepath.rsplit( os.sep, 1 )[0] + os.sep
+
+    # root_folder, config_blocks, output_folder, config_folder, final_encode
+
+    video_list, base_output_folder = ParseConfig(config_blocks, base_output_folder, config_folder)
+
+    PrintTimestampsFile(video_list, base_output_folder)
+
+    StartEncodingVideos(video_list)
+
+    # would be cool to add crc checking for each time range somehow
+
+    print("Finished")
+    print("---------------------------------------------------------------\n")
 
 
 if __name__ == "__main__":
-
+    # Setup global vars
+    root_folder = os.path.dirname(os.path.realpath(__file__)) + os.sep
     config_filepath = FindCommandValue("--config", "-c")
     ffmpeg_bin = FindCommandValue("--ffmpeg_bin", "-ff")
     final_encode = FindCommand("/final", "/f")
@@ -905,29 +740,5 @@ if __name__ == "__main__":
         # default ffmpeg bin path
         ffmpeg_bin = "D:/demez_archive/video_editing/ffmpeg/current/bin/"
 
-    config_blocks = ReadConfig( config_filepath )
-
-    root_folder = os.path.dirname(os.path.realpath(__file__))
-
-    if os.sep not in config_filepath:
-        config_folder = os.getcwd() + os.sep
-    else:
-        config_folder = config_filepath.rsplit( os.sep, 1 )[0] + os.sep
-
-    # base_output_folder = config_folder + "output" + os.sep
-    base_output_folder = "output" + os.sep
-
-    # root_folder, config_blocks, output_folder, config_folder, final_encode
-
-    video_list, base_output_folder = ParseConfig(root_folder, config_blocks, base_output_folder, config_folder, final_encode)
-
-    PrintTimestampsFile(video_list, base_output_folder, final_encode, verbose)
-
-    StartEncodingVideos(video_list)
-
-    # would be cool to add crc checking for each time range somehow
-
-    print("Finished")
-    print("---------------------------------------------------------------\n")
-
+    main()
 
